@@ -14,6 +14,8 @@ import json
 import sys
 from pathlib import Path
 
+from stats import iqr_bounds, split_outliers, summary_stats
+
 # SP buckets with fewer than this many PRs are flagged as low-confidence.
 # A median/avg from 1–2 data points is statistically meaningless and can
 # swing wildly between periods due to a single outlier PR.
@@ -52,55 +54,6 @@ def _trend_word(delta: float | None, lower_is_better: bool = True) -> str:
     if lower_is_better:
         return "improved" if delta < 0 else "worsened"
     return "improved" if delta > 0 else "worsened"
-
-
-def _iqr_bounds(vals: list[float], k: float = 3.0) -> tuple[float, float]:
-    """Return (lower, upper) outlier fences using k * IQR rule."""
-    if len(vals) < 4:
-        return (float("-inf"), float("inf"))
-    s = sorted(vals)
-    n = len(s)
-    q1 = s[n // 4]
-    q3 = s[(3 * n) // 4]
-    iqr = q3 - q1
-    return (q1 - k * iqr, q3 + k * iqr)
-
-
-def _detect_outliers(
-    vals: list[float], k: float = 3.0
-) -> tuple[list[float], list[float]]:
-    """Split vals into (clean, outliers) using k * IQR fences."""
-    if not vals:
-        return [], []
-    _, upper = _iqr_bounds(vals, k)
-    clean = [v for v in vals if v <= upper]
-    outliers = [v for v in vals if v > upper]
-    return clean, outliers
-
-
-def _stats_dict_from_vals(vals: list[float]) -> dict:
-    """Compute avg/median/p75 from a list, returning None-filled dict if empty."""
-    from math import floor, ceil
-
-    def pct(s: list[float], p: float) -> float | None:
-        if not s:
-            return None
-        if len(s) == 1:
-            return s[0]
-        k = (len(s) - 1) * (p / 100.0)
-        f, c = floor(k), ceil(k)
-        if f == c:
-            return s[int(k)]
-        return s[f] * (c - k) + s[c] * (k - f)
-
-    if not vals:
-        return {"avg": None, "median": None, "p75": None}
-    s = sorted(vals)
-    return {
-        "avg": round(sum(s) / len(s), 4),
-        "median": round(pct(s, 50), 4),
-        "p75": round(pct(s, 75), 4),
-    }
 
 
 def _period_labels(a: dict, b: dict, ai_adoption: bool) -> tuple[str, str]:
@@ -545,11 +498,11 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
     sa, sb = a["stats"]["days"], b["stats"]["days"]
     raw_a: list[float] = a.get("raw_days", [])
     raw_b: list[float] = b.get("raw_days", [])
-    clean_a, outliers_a = _detect_outliers(raw_a) if raw_a else ([], [])
-    clean_b, outliers_b = _detect_outliers(raw_b) if raw_b else ([], [])
+    clean_a, outliers_a = split_outliers(raw_a) if raw_a else ([], [])
+    clean_b, outliers_b = split_outliers(raw_b) if raw_b else ([], [])
     has_outliers = bool(outliers_a or outliers_b)
-    clean_stats_a = _stats_dict_from_vals(clean_a) if clean_a else None
-    clean_stats_b = _stats_dict_from_vals(clean_b) if clean_b else None
+    clean_stats_a = summary_stats(clean_a) if clean_a else None
+    clean_stats_b = summary_stats(clean_b) if clean_b else None
 
     lines.append("")
     lines.append("  TIME TO 2ND APPROVAL (days) — ALL PRs")
@@ -629,7 +582,7 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
             for v in [repos_a.get(r, {}).get("avg_days"), repos_b.get(r, {}).get("avg_days")]
             if v is not None
         ]
-        _, repo_outlier_upper = _iqr_bounds(all_repo_avgs) if len(all_repo_avgs) >= 4 else (None, float("inf"))
+        _, repo_outlier_upper = iqr_bounds(all_repo_avgs) if len(all_repo_avgs) >= 4 else (None, float("inf"))
 
         for repo in all_repos:
             avg_a = repos_a.get(repo, {}).get("avg_days")
