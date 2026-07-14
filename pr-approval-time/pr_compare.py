@@ -115,10 +115,7 @@ def _period_labels(a: dict, b: dict, ai_adoption: bool) -> tuple[str, str]:
 
 def render_ai_impact_summary(a: dict, b: dict) -> str:
     """Print an AI adoption-specific impact narrative."""
-    out: list[str] = []
-    def w(s: str = "") -> None:
-        out.append(s)
-
+    lines: list[str] = []
     pa, pb = a["period"], b["period"]
     label_a = f"{pa['from']} to {pa['to']}"
     label_b = f"{pb['from']} to {pb['to']}"
@@ -135,112 +132,109 @@ def render_ai_impact_summary(a: dict, b: dict) -> str:
     vol_a, vol_b = sma.get("total_examined", 0), smb.get("total_examined", 0)
     apr_a, apr_b = sma.get("total_approved", 0), smb.get("total_approved", 0)
 
-    w()
-    w("════════════════════════════════════════════════════════════════════════")
-    w("  AI ADOPTION IMPACT — COPILOT CODE REVIEW")
-    w("════════════════════════════════════════════════════════════════════════")
-    w()
-    w("  METHODOLOGY")
-    w(f"  Baseline  : {label_a}  — human reviewers only")
-    w(f"  Post-AI   : {label_b}  — Copilot reviews every PR")
-    w()
-    w("  This comparison uses a time-based cohort rather than per-PR detection.")
-    w("  All PRs in the post-AI period are assumed to have received a Copilot")
-    w("  review. This is a reasonable proxy when rollout is team-wide and")
-    w("  consistent, but note that other factors (team velocity, PR size,")
-    w("  holiday periods) may also influence the delta. One month of post-AI")
-    w("  data is early-signal only — treat trends with appropriate caution.")
-    w()
+    lines.append("")
+    lines.append("════════════════════════════════════════════════════════════════════════")
+    lines.append("  AI ADOPTION IMPACT — COPILOT CODE REVIEW")
+    lines.append("════════════════════════════════════════════════════════════════════════")
+    lines.append("")
+    lines.append("  METHODOLOGY")
+    lines.append(f"  Baseline  : {label_a}  — human reviewers only")
+    lines.append(f"  Post-AI   : {label_b}  — Copilot reviews every PR")
+    lines.append("")
+    lines.append("  This comparison uses a time-based cohort rather than per-PR detection.")
+    lines.append("  All PRs in the post-AI period are assumed to have received a Copilot")
+    lines.append("  review. This is a reasonable proxy when rollout is team-wide and")
+    lines.append("  consistent, but note that other factors (team velocity, PR size,")
+    lines.append("  holiday periods) may also influence the delta. One month of post-AI")
+    lines.append("  data is early-signal only — treat trends with appropriate caution.")
+    lines.append("")
 
     # Headline: median
-    w("  HEADLINE — MEDIAN TIME TO 2ND APPROVAL")
+    lines.append("  HEADLINE — MEDIAN TIME TO 2ND APPROVAL")
     if med_a is not None and med_b is not None:
         med_delta = med_b - med_a
         direction = "decreased" if med_delta < 0 else "increased"
         sign = "" if med_delta < 0 else "+"
-        w(
+        lines.append(
             f"  Median time to second approval {direction} from {med_a:.2f} days (baseline)"
             f" to {med_b:.2f} days (post-AI) — a change of {sign}{med_delta:.2f} days."
         )
         if abs(med_delta) < 0.1:
-            w("  This is a negligible shift; median performance is effectively unchanged.")
+            lines.append("  This is a negligible shift; median performance is effectively unchanged.")
         elif med_delta < 0:
-            w("  The typical PR is moving through review faster after AI adoption.")
+            lines.append("  The typical PR is moving through review faster after AI adoption.")
         else:
-            w("  The typical PR is taking longer to reach a second approval.")
-            w("  This does not necessarily indicate AI is slowing reviews — volume")
-            w("  changes, PR complexity, or reviewer availability may be contributing.")
+            lines.append("  The typical PR is taking longer to reach a second approval.")
+            lines.append("  This does not necessarily indicate AI is slowing reviews — volume")
+            lines.append("  changes, PR complexity, or reviewer availability may be contributing.")
     else:
-        w("  Insufficient data to compare median times.")
-    w()
+        lines.append("  Insufficient data to compare median times.")
+    lines.append("")
 
     # Tail: p75 (most actionable for slow PRs)
-    w("  TAIL PERFORMANCE — P75 (SLOWEST QUARTER OF PRS)")
+    lines.append("  TAIL PERFORMANCE — P75 (SLOWEST QUARTER OF PRS)")
     if p75_a is not None and p75_b is not None:
         p75_delta = p75_b - p75_a
         direction = "decreased" if p75_delta < 0 else "increased"
         sign = "" if p75_delta < 0 else "+"
-        w(
+        lines.append(
             f"  The 75th percentile {direction} from {p75_a:.2f} to {p75_b:.2f} days"
             f" ({sign}{p75_delta:.2f} days)."
         )
-        w(
+        lines.append(
             "  The p75 captures your slowest-moving quarter of PRs — often the ones"
             " most likely to benefit from an AI first-pass that surfaces issues early."
         )
         if p75_delta < -0.5:
-            w("  A meaningful drop here suggests AI is helping unblock complex or slow PRs.")
+            lines.append("  A meaningful drop here suggests AI is helping unblock complex or slow PRs.")
         elif p75_delta > 0.5:
-            w("  A rise here warrants monitoring — slow PRs are getting slower.")
+            lines.append("  A rise here warrants monitoring — slow PRs are getting slower.")
     else:
-        w("  Insufficient data to compare p75 times.")
-    w()
+        lines.append("  Insufficient data to compare p75 times.")
+    lines.append("")
 
     # Effort-adjusted
     if dsp_med_a is not None and dsp_med_b is not None:
         dsp_delta = dsp_med_b - dsp_med_a
         direction = "decreased" if dsp_delta < 0 else "increased"
         sign = "" if dsp_delta < 0 else "+"
-        w("  EFFORT-ADJUSTED — MEDIAN DAYS PER STORY POINT")
-        w(
+        lines.append("  EFFORT-ADJUSTED — MEDIAN DAYS PER STORY POINT")
+        lines.append(
             f"  When normalised for ticket complexity, the median days per story point"
             f" {direction} from {dsp_med_a:.3f} to {dsp_med_b:.3f} ({sign}{dsp_delta:.3f} d/SP)."
         )
-        w(
+        lines.append(
             "  This accounts for whether the team is shipping larger or smaller tickets"
             " between periods, giving a fairer like-for-like comparison."
         )
-        w()
+        lines.append("")
 
     # Volume context
-    w("  VOLUME CONTEXT")
+    lines.append("  VOLUME CONTEXT")
     vol_delta = vol_b - vol_a
     apr_delta = apr_b - apr_a
     vol_sign = "+" if vol_delta >= 0 else ""
     apr_sign = "+" if apr_delta >= 0 else ""
-    w(f"  PRs examined : {vol_a} (baseline) → {vol_b} (post-AI)  [{vol_sign}{vol_delta}]")
-    w(f"  PRs w/ 2+ approvals: {apr_a} → {apr_b}  [{apr_sign}{apr_delta}]")
-    w()
-    w("  Note: a rising PR volume can inflate average and p75 times independently")
-    w("  of AI impact. Interpret deltas in the context of throughput changes.")
-    w()
+    lines.append(f"  PRs examined : {vol_a} (baseline) → {vol_b} (post-AI)  [{vol_sign}{vol_delta}]")
+    lines.append(f"  PRs w/ 2+ approvals: {apr_a} → {apr_b}  [{apr_sign}{apr_delta}]")
+    lines.append("")
+    lines.append("  Note: a rising PR volume can inflate average and p75 times independently")
+    lines.append("  of AI impact. Interpret deltas in the context of throughput changes.")
+    lines.append("")
 
     # What to watch next
-    w("  WHAT TO WATCH")
-    w("  - Run this comparison monthly as more post-AI data accumulates.")
-    w("  - Watch the p75 trend — sustained improvement there is the strongest")
-    w("    signal that AI reviews are surfacing issues before human reviewers.")
-    w("  - If median days/SP improves while PR volume rises, that is a strong")
-    w("    positive signal that the team is delivering more with less review friction.")
-    w()
-    return "\n".join(out)
+    lines.append("  WHAT TO WATCH")
+    lines.append("  - Run this comparison monthly as more post-AI data accumulates.")
+    lines.append("  - Watch the p75 trend — sustained improvement there is the strongest")
+    lines.append("    signal that AI reviews are surfacing issues before human reviewers.")
+    lines.append("  - If median days/SP improves while PR volume rises, that is a strong")
+    lines.append("    positive signal that the team is delivering more with less review friction.")
+    lines.append("")
+    return "\n".join(lines)
 
 def render_executive_summary(a: dict, b: dict, ai_adoption: bool = False) -> str:
     """Print a concise executive and leadership summary in plain prose."""
-    out: list[str] = []
-    def w(s: str = "") -> None:
-        out.append(s)
-
+    lines: list[str] = []
     label_a, label_b = _period_labels(a, b, ai_adoption)
 
     sma, smb = a["summary"], b["summary"]
@@ -260,70 +254,70 @@ def render_executive_summary(a: dict, b: dict, ai_adoption: bool = False) -> str
     apr_b = smb.get("total_approved", 0)
     vol_delta = vol_b - vol_a
 
-    w()
-    w("════════════════════════════════════════════════════════════════════════")
-    w("  EXECUTIVE SUMMARY")
-    w("════════════════════════════════════════════════════════════════════════")
-    w()
-    w("  This report compares pull request review performance across two periods:")
-    w(f"    Period A : {label_a}")
-    w(f"               {vol_a} pull requests examined, {apr_a} with two or more approvals")
-    w(f"    Period B : {label_b}")
-    w(f"               {vol_b} pull requests examined, {apr_b} with two or more approvals")
-    w()
+    lines.append("")
+    lines.append("════════════════════════════════════════════════════════════════════════")
+    lines.append("  EXECUTIVE SUMMARY")
+    lines.append("════════════════════════════════════════════════════════════════════════")
+    lines.append("")
+    lines.append("  This report compares pull request review performance across two periods:")
+    lines.append(f"    Period A : {label_a}")
+    lines.append(f"               {vol_a} pull requests examined, {apr_a} with two or more approvals")
+    lines.append(f"    Period B : {label_b}")
+    lines.append(f"               {vol_b} pull requests examined, {apr_b} with two or more approvals")
+    lines.append("")
 
     # Headline metric
-    w("  HEADLINE METRIC — MEDIAN TIME TO SECOND APPROVAL")
+    lines.append("  HEADLINE METRIC — MEDIAN TIME TO SECOND APPROVAL")
     if med_a is not None and med_b is not None:
         trend = _trend_word(med_delta)
         if trend == "held steady":
-            w(f"  The median time for a pull request to receive a second approval held steady")
-            w(f"  at {_fmt(med_b)} days across both periods.")
+            lines.append(f"  The median time for a pull request to receive a second approval held steady")
+            lines.append(f"  at {_fmt(med_b)} days across both periods.")
         else:
             direction = "reduced" if med_delta < 0 else "increased"
-            w(
+            lines.append(
                 f"  The median time for a pull request to receive a second approval {trend} by"
                 f" {abs(med_delta):.2f} days,"
             )
-            w(
+            lines.append(
                 f"  {direction} from {_fmt(med_a)} days in Period A to {_fmt(med_b)} days in Period B."
             )
     else:
-        w("  Insufficient data to calculate median time to second approval.")
-    w()
+        lines.append("  Insufficient data to calculate median time to second approval.")
+    lines.append("")
 
     # Supporting metrics
-    w("  SUPPORTING METRICS")
+    lines.append("  SUPPORTING METRICS")
     if avg_a is not None and avg_b is not None:
         trend = _trend_word(avg_delta)
         if trend == "held steady":
-            w(f"  The average time to second approval held steady at {_fmt(avg_b)} days.")
+            lines.append(f"  The average time to second approval held steady at {_fmt(avg_b)} days.")
         else:
             direction = "reduced" if avg_delta < 0 else "increased"
-            w(
+            lines.append(
                 f"  The average time to second approval {trend} by {abs(avg_delta):.2f} days,"
                 f" {direction} from {_fmt(avg_a)} to {_fmt(avg_b)} days."
             )
     if p75_a is not None and p75_b is not None:
         trend = _trend_word(p75_delta)
         if trend == "held steady":
-            w(f"  The 75th percentile time to second approval held steady at {_fmt(p75_b)} days.")
+            lines.append(f"  The 75th percentile time to second approval held steady at {_fmt(p75_b)} days.")
         else:
             direction = "reduced" if p75_delta < 0 else "increased"
-            w(
+            lines.append(
                 f"  The 75th percentile time to second approval (the slowest quarter of pull requests)"
                 f" {trend} by {abs(p75_delta):.2f} days,"
             )
-            w(f"  {direction} from {_fmt(p75_a)} to {_fmt(p75_b)} days.")
+            lines.append(f"  {direction} from {_fmt(p75_a)} to {_fmt(p75_b)} days.")
     if vol_delta == 0:
-        w(f"  Pull request volume remained unchanged at {vol_b} examined.")
+        lines.append(f"  Pull request volume remained unchanged at {vol_b} examined.")
     elif vol_delta > 0:
-        w(
+        lines.append(
             f"  Pull request volume increased by {vol_delta} pull requests,"
             f" from {vol_a} to {vol_b} examined."
         )
     else:
-        w(
+        lines.append(
             f"  Pull request volume decreased by {abs(vol_delta)} pull requests,"
             f" from {vol_a} to {vol_b} examined."
         )
@@ -334,32 +328,29 @@ def render_executive_summary(a: dict, b: dict, ai_adoption: bool = False) -> str
     if dsp_med_a is not None and dsp_med_b is not None:
         dsp_delta = dsp_med_b - dsp_med_a
         trend = _trend_word(dsp_delta)
-        w()
-        w("  EFFORT-ADJUSTED PERFORMANCE — DAYS PER STORY POINT")
+        lines.append("")
+        lines.append("  EFFORT-ADJUSTED PERFORMANCE — DAYS PER STORY POINT")
         if trend == "held steady":
-            w(
+            lines.append(
                 f"  When accounting for work complexity, the median days per story point held steady"
                 f" at {_fmt(dsp_med_b)} days per story point."
             )
         else:
             direction = "reduced" if dsp_delta < 0 else "increased"
-            w(
+            lines.append(
                 f"  When accounting for work complexity, the median days per story point {trend} by"
                 f" {abs(dsp_delta):.2f} days,"
             )
-            w(
+            lines.append(
                 f"  {direction} from {_fmt(dsp_med_a)} to {_fmt(dsp_med_b)} days per story point."
             )
-    w()
-    return "\n".join(out)
+    lines.append("")
+    return "\n".join(lines)
 
 def render_delivery_leads_summary(a: dict, b: dict, ai_adoption: bool = False) -> str:
     """Print an operational summary for delivery leads: per-repository movements,
     story point trends, and data coverage observations."""
-    out: list[str] = []
-    def w(s: str = "") -> None:
-        out.append(s)
-
+    lines: list[str] = []
     label_a, label_b = _period_labels(a, b, ai_adoption)
 
     sma, smb = a["summary"], b["summary"]
@@ -390,54 +381,54 @@ def render_delivery_leads_summary(a: dict, b: dict, ai_adoption: bool = False) -
         key=lambda x: (0, float(x)) if x.replace(".", "", 1).isdigit() else (1, x),
     )
 
-    w("════════════════════════════════════════════════════════════════════════")
-    w("  DELIVERY LEADS SUMMARY")
-    w("════════════════════════════════════════════════════════════════════════")
-    w()
-    w(f"  Comparing Period A ({label_a}) against Period B ({label_b}).")
-    w()
+    lines.append("════════════════════════════════════════════════════════════════════════")
+    lines.append("  DELIVERY LEADS SUMMARY")
+    lines.append("════════════════════════════════════════════════════════════════════════")
+    lines.append("")
+    lines.append(f"  Comparing Period A ({label_a}) against Period B ({label_b}).")
+    lines.append("")
 
     # --- Per-repository movements ---
     if repo_deltas:
-        w("  REPOSITORY PERFORMANCE MOVEMENTS")
-        w()
+        lines.append("  REPOSITORY PERFORMANCE MOVEMENTS")
+        lines.append("")
         if most_improved and most_improved[0][3] < -0.01:
-            w("  Repositories with the most improved average time to second approval:")
+            lines.append("  Repositories with the most improved average time to second approval:")
             for name, avg_a_val, avg_b_val, delta in most_improved:
                 if delta < -0.01:
-                    w(
+                    lines.append(
                         f"    {name}: reduced by {abs(delta):.2f} days"
                         f" (from {_fmt(avg_a_val)} to {_fmt(avg_b_val)} days on average)"
                     )
-            w()
+            lines.append("")
         if most_worsened and most_worsened[0][3] > 0.01:
-            w("  Repositories with the most worsened average time to second approval:")
+            lines.append("  Repositories with the most worsened average time to second approval:")
             for name, avg_a_val, avg_b_val, delta in most_worsened:
                 if delta > 0.01:
-                    w(
+                    lines.append(
                         f"    {name}: increased by {delta:.2f} days"
                         f" (from {_fmt(avg_a_val)} to {_fmt(avg_b_val)} days on average)"
                     )
-            w()
+            lines.append("")
 
     # --- Coverage changes ---
     if new_repos or dropped_repos:
-        w("  DATA COVERAGE CHANGES")
+        lines.append("  DATA COVERAGE CHANGES")
         if new_repos:
-            w(
+            lines.append(
                 f"  The following {'repository' if len(new_repos) == 1 else 'repositories'}"
                 f" appeared in Period B but had no data in Period A:"
             )
             for r in new_repos:
-                w(f"    {r}")
+                lines.append(f"    {r}")
         if dropped_repos:
-            w(
+            lines.append(
                 f"  The following {'repository' if len(dropped_repos) == 1 else 'repositories'}"
                 f" had data in Period A but are absent from Period B:"
             )
             for r in dropped_repos:
-                w(f"    {r}")
-        w()
+                lines.append(f"    {r}")
+        lines.append("")
 
     # --- Story point complexity trends ---
     if all_sp:
@@ -455,26 +446,26 @@ def render_delivery_leads_summary(a: dict, b: dict, ai_adoption: bool = False) -
                     sp_deltas.append((sp, med_a, med_b, med_b - med_a, cnt_a, cnt_b))
 
         if sp_deltas:
-            w("  STORY POINT COMPLEXITY TRENDS — MEDIAN DAYS TO SECOND APPROVAL")
-            w()
+            lines.append("  STORY POINT COMPLEXITY TRENDS — MEDIAN DAYS TO SECOND APPROVAL")
+            lines.append("")
             for sp, med_a_val, med_b_val, delta, cnt_a, cnt_b in sp_deltas:
                 trend = _trend_word(delta)
                 if trend == "held steady":
-                    w(
+                    lines.append(
                         f"  {sp}-point work: held steady at {_fmt(med_b_val)} days"
                         f" ({cnt_a} pull requests in Period A, {cnt_b} in Period B)"
                     )
                 else:
                     direction = "reduced" if delta < 0 else "increased"
-                    w(
+                    lines.append(
                         f"  {sp}-point work: {trend} by {abs(delta):.2f} days,"
                         f" {direction} from {_fmt(med_a_val)} to {_fmt(med_b_val)} days"
                         f" ({cnt_a} pull requests in Period A, {cnt_b} in Period B)"
                     )
-            w()
+            lines.append("")
 
         if low_confidence_sp:
-            w(
+            lines.append(
                 f"  The following story point {'bucket' if len(low_confidence_sp) == 1 else 'buckets'}"
                 f" had fewer than {MIN_SP_COUNT} pull requests in at least one period and"
                 f" {'has' if len(low_confidence_sp) == 1 else 'have'} been excluded from the trend"
@@ -486,11 +477,11 @@ def render_delivery_leads_summary(a: dict, b: dict, ai_adoption: bool = False) -
                 cnt_b = sp_b.get(sp, {}).get("count", 0)
                 med_a = sp_a.get(sp, {}).get("median_days")
                 med_b = sp_b.get(sp, {}).get("median_days")
-                w(
+                lines.append(
                     f"    {sp}-point work: {_fmt(med_a)} → {_fmt(med_b)} days"
                     f" (n={cnt_a} in Period A, n={cnt_b} in Period B)"
                 )
-            w()
+            lines.append("")
 
     # --- Exclusion / data quality notes ---
     exc_no_jira_a = sma.get("excluded_no_jira", 0)
@@ -502,47 +493,44 @@ def render_delivery_leads_summary(a: dict, b: dict, ai_adoption: bool = False) -
 
     any_exclusions = any([exc_no_jira_a, exc_no_jira_b, exc_no_sp_a, exc_no_sp_b, exc_lt2_a, exc_lt2_b])
     if any_exclusions:
-        w("  DATA QUALITY NOTES")
+        lines.append("  DATA QUALITY NOTES")
         if exc_lt2_a or exc_lt2_b:
-            w(
+            lines.append(
                 f"  Pull requests excluded for having fewer than two approvals:"
                 f" {exc_lt2_a} in Period A, {exc_lt2_b} in Period B."
             )
         if exc_no_jira_a or exc_no_jira_b:
-            w(
+            lines.append(
                 f"  Pull requests excluded for missing a Jira ticket reference:"
                 f" {exc_no_jira_a} in Period A, {exc_no_jira_b} in Period B."
             )
         if exc_no_sp_a or exc_no_sp_b:
-            w(
+            lines.append(
                 f"  Pull requests excluded for missing story point estimates:"
                 f" {exc_no_sp_a} in Period A, {exc_no_sp_b} in Period B."
             )
-        w()
-    return "\n".join(out)
+        lines.append("")
+    return "\n".join(lines)
 
 def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
-    out: list[str] = []
-    def w(s: str = "") -> None:
-        out.append(s)
-
+    lines: list[str] = []
     label_a, label_b = _period_labels(a, b, ai_adoption)
     col_a = "Baseline" if ai_adoption else "Period A"
     col_b = "Post-AI" if ai_adoption else "Period B"
 
-    w()
-    w("════════════════════════════════════════════════════════════════════════")
-    w(f"  COMPARISON")
-    w(f"  {'Baseline' if ai_adoption else 'Period A'} : {label_a}")
-    w(f"  {'Post-AI ' if ai_adoption else 'Period B'} : {label_b}")
-    w("════════════════════════════════════════════════════════════════════════")
+    lines.append("")
+    lines.append("════════════════════════════════════════════════════════════════════════")
+    lines.append(f"  COMPARISON")
+    lines.append(f"  {'Baseline' if ai_adoption else 'Period A'} : {label_a}")
+    lines.append(f"  {'Post-AI ' if ai_adoption else 'Period B'} : {label_b}")
+    lines.append("════════════════════════════════════════════════════════════════════════")
 
     # --- Volume ---
     sma, smb = a["summary"], b["summary"]
-    w()
-    w("  VOLUME")
-    w(f"  {'Metric':<26}  {col_a:>10}  {col_b:>10}  {'Change':>10}")
-    w("  " + "─" * 62)
+    lines.append("")
+    lines.append("  VOLUME")
+    lines.append(f"  {'Metric':<26}  {col_a:>10}  {col_b:>10}  {'Change':>10}")
+    lines.append("  " + "─" * 62)
     for key, label in [
         ("total_examined", "PRs examined"),
         ("total_approved", "PRs w/ 2+ approvals"),
@@ -551,7 +539,7 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
         ("excluded_no_sp", "Excluded (no story pts)"),
     ]:
         va, vb = sma.get(key, 0), smb.get(key, 0)
-        w(f"  {label:<26}  {va:>10}  {vb:>10}  {_delta_int(va, vb):>10}")
+        lines.append(f"  {label:<26}  {va:>10}  {vb:>10}  {_delta_int(va, vb):>10}")
 
     # --- Days to 2nd approval (with optional clean stats when raw_days available) ---
     sa, sb = a["stats"]["days"], b["stats"]["days"]
@@ -563,12 +551,12 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
     clean_stats_a = _stats_dict_from_vals(clean_a) if clean_a else None
     clean_stats_b = _stats_dict_from_vals(clean_b) if clean_b else None
 
-    w()
-    w("  TIME TO 2ND APPROVAL (days) — ALL PRs")
-    w(f"  {'Metric':<10}  {col_a:>10}  {col_b:>10}  {'Change':>10}")
-    w("  " + "─" * 46)
+    lines.append("")
+    lines.append("  TIME TO 2ND APPROVAL (days) — ALL PRs")
+    lines.append(f"  {'Metric':<10}  {col_a:>10}  {col_b:>10}  {'Change':>10}")
+    lines.append("  " + "─" * 46)
     for metric in ("median", "p75", "avg"):
-        w(
+        lines.append(
             f"  {metric:<10}  {_fmt(sa.get(metric)):>10}"
             f"  {_fmt(sb.get(metric)):>10}  {_delta(sa.get(metric), sb.get(metric)):>10}"
         )
@@ -576,18 +564,18 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
     if has_outliers and (clean_stats_a or clean_stats_b):
         n_out_a = len(outliers_a)
         n_out_b = len(outliers_b)
-        w()
-        w(f"  TIME TO 2ND APPROVAL (days) — OUTLIERS REMOVED")
+        lines.append("")
+        lines.append(f"  TIME TO 2ND APPROVAL (days) — OUTLIERS REMOVED")
         note_a = f"  (excl. {n_out_a} outlier{'s' if n_out_a != 1 else ''})" if n_out_a else ""
         note_b = f"  (excl. {n_out_b} outlier{'s' if n_out_b != 1 else ''})" if n_out_b else ""
-        w(f"  {col_a}{note_a}")
-        w(f"  {col_b}{note_b}")
-        w(f"  {'Metric':<10}  {col_a:>10}  {col_b:>10}  {'Change':>10}")
-        w("  " + "─" * 46)
+        lines.append(f"  {col_a}{note_a}")
+        lines.append(f"  {col_b}{note_b}")
+        lines.append(f"  {'Metric':<10}  {col_a:>10}  {col_b:>10}  {'Change':>10}")
+        lines.append("  " + "─" * 46)
         csa = clean_stats_a or sa
         csb = clean_stats_b or sb
         for metric in ("median", "p75", "avg"):
-            w(
+            lines.append(
                 f"  {metric:<10}  {_fmt(csa.get(metric)):>10}"
                 f"  {_fmt(csb.get(metric)):>10}  {_delta(csa.get(metric), csb.get(metric)):>10}"
             )
@@ -596,32 +584,32 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
     dpa, dpb = a["stats"]["days_per_sp"], b["stats"]["days_per_sp"]
     has_dsp = any(v is not None for v in list(dpa.values()) + list(dpb.values()))
     if has_dsp:
-        w()
-        w("  DAYS PER STORY POINT")
-        w(f"  {'Metric':<10}  {col_a:>10}  {col_b:>10}  {'Change':>10}")
-        w("  " + "─" * 46)
+        lines.append("")
+        lines.append("  DAYS PER STORY POINT")
+        lines.append(f"  {'Metric':<10}  {col_a:>10}  {col_b:>10}  {'Change':>10}")
+        lines.append("  " + "─" * 46)
         for metric in ("median", "p75", "avg"):
-            w(
+            lines.append(
                 f"  {metric:<10}  {_fmt(dpa.get(metric)):>10}"
                 f"  {_fmt(dpb.get(metric)):>10}  {_delta(dpa.get(metric), dpb.get(metric)):>10}"
             )
 
     # --- Outlier detail ---
     if has_outliers:
-        w()
-        w("  OUTLIERS  (detected via 3×IQR rule — excluded from clean stats above)")
-        w("  ─────────────────────────────────────────────────────")
+        lines.append("")
+        lines.append("  OUTLIERS  (detected via 3×IQR rule — excluded from clean stats above)")
+        lines.append("  ─────────────────────────────────────────────────────")
         if outliers_a:
             for v in sorted(outliers_a, reverse=True):
-                w(f"  {col_a:<10}  {v:.2f} days")
+                lines.append(f"  {col_a:<10}  {v:.2f} days")
         if outliers_b:
             for v in sorted(outliers_b, reverse=True):
-                w(f"  {col_b:<10}  {v:.2f} days")
-        w()
-        w("  These PRs are long-running branches merged into the window.")
-        w("  They remain in the full dataset above but skew avg significantly.")
-        w("  Investigate these PRs to understand whether they represent process")
-        w("  debt, blocked work, or branches held open across multiple sprints.")
+                lines.append(f"  {col_b:<10}  {v:.2f} days")
+        lines.append("")
+        lines.append("  These PRs are long-running branches merged into the window.")
+        lines.append("  They remain in the full dataset above but skew avg significantly.")
+        lines.append("  Investigate these PRs to understand whether they represent process")
+        lines.append("  debt, blocked work, or branches held open across multiple sprints.")
 
     # --- Per-repo avg ---
     repos_a = {r["name"]: r for r in a.get("repos", [])}
@@ -629,10 +617,10 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
     all_repos = sorted(set(repos_a) | set(repos_b))
 
     if all_repos:
-        w()
-        w("  PER-REPO AVG DAYS TO 2ND APPROVAL")
-        w(f"  {'Repository':<45}  {col_a:>10}  {col_b:>10}  {'Change':>10}")
-        w("  " + "─" * 74)
+        lines.append("")
+        lines.append("  PER-REPO AVG DAYS TO 2ND APPROVAL")
+        lines.append(f"  {'Repository':<45}  {col_a:>10}  {col_b:>10}  {'Change':>10}")
+        lines.append("  " + "─" * 74)
         # Compute per-repo outlier threshold: repos whose avg_days is an outlier
         # relative to all repo avgs (using same IQR rule). Only flag if we have
         # enough repos with data to make the detection meaningful.
@@ -649,7 +637,7 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
             is_outlier = (avg_a is not None and avg_a > repo_outlier_upper) or \
                          (avg_b is not None and avg_b > repo_outlier_upper)
             flag = "  ⚠ outlier" if is_outlier else ""
-            w(
+            lines.append(
                 f"  {repo:<45.45}  {_fmt(avg_a):>10}"
                 f"  {_fmt(avg_b):>10}  {_delta(avg_a, avg_b):>10}{flag}"
             )
@@ -667,14 +655,14 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
             sp_a.get(sp, {}).get("min_days") is not None or sp_b.get(sp, {}).get("min_days") is not None
             for sp in all_sp
         )
-        w()
-        w("  STORY POINT GROUPS — MEDIAN DAYS")
+        lines.append("")
+        lines.append("  STORY POINT GROUPS — MEDIAN DAYS")
         if has_ranges:
-            w(f"  {'SP':<8}  {f'{col_a} (med [min–max])':>28}  {f'{col_b} (med [min–max])':>28}  {'Change':>10}  {'Count A':>8}  {'Count B':>8}  Note")
-            w("  " + "─" * 104)
+            lines.append(f"  {'SP':<8}  {f'{col_a} (med [min–max])':>28}  {f'{col_b} (med [min–max])':>28}  {'Change':>10}  {'Count A':>8}  {'Count B':>8}  Note")
+            lines.append("  " + "─" * 104)
         else:
-            w(f"  {'SP':<8}  {col_a:>10}  {col_b:>10}  {'Change':>10}  {'Count A':>8}  {'Count B':>8}  Note")
-            w("  " + "─" * 80)
+            lines.append(f"  {'SP':<8}  {col_a:>10}  {col_b:>10}  {'Change':>10}  {'Count A':>8}  {'Count B':>8}  Note")
+            lines.append("  " + "─" * 80)
         for sp in all_sp:
             ga = sp_a.get(sp, {})
             gb = sp_b.get(sp, {})
@@ -695,12 +683,12 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
                 )
                 cell_a = f"{_fmt(med_a)}{range_a}"
                 cell_b = f"{_fmt(med_b)}{range_b}"
-                w(
+                lines.append(
                     f"  {sp:<8}  {cell_a:>28}  {cell_b:>28}"
                     f"  {_delta(med_a, med_b):>10}  {cnt_a:>8}  {cnt_b:>8}  {note}"
                 )
             else:
-                w(
+                lines.append(
                     f"  {sp:<8}  {_fmt(med_a):>10}  {_fmt(med_b):>10}"
                     f"  {_delta(med_a, med_b):>10}  {cnt_a:>8}  {cnt_b:>8}  {note}"
                 )
@@ -712,10 +700,10 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
         for sp in all_sp
     )
     if all_sp and has_dsp_groups:
-        w()
-        w("  STORY POINT GROUPS — MEDIAN DAYS PER STORY POINT")
-        w(f"  {'SP':<8}  {col_a:>10}  {col_b:>10}  {'Change':>10}  {'Count A':>8}  {'Count B':>8}  Note")
-        w("  " + "─" * 80)
+        lines.append("")
+        lines.append("  STORY POINT GROUPS — MEDIAN DAYS PER STORY POINT")
+        lines.append(f"  {'SP':<8}  {col_a:>10}  {col_b:>10}  {'Change':>10}  {'Count A':>8}  {'Count B':>8}  Note")
+        lines.append("  " + "─" * 80)
         for sp in all_sp:
             ga = sp_a.get(sp, {})
             gb = sp_b.get(sp, {})
@@ -725,13 +713,13 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
             cnt_b = gb.get("count", 0)
             low = cnt_a < MIN_SP_COUNT or cnt_b < MIN_SP_COUNT
             note = f"⚠ low n ({cnt_a}/{cnt_b})" if low else ""
-            w(
+            lines.append(
                 f"  {sp:<8}  {_fmt(med_a):>10}  {_fmt(med_b):>10}"
                 f"  {_delta(med_a, med_b):>10}  {cnt_a:>8}  {cnt_b:>8}  {note}"
             )
 
-    w()
-    return "\n".join(out)
+    lines.append("")
+    return "\n".join(lines)
 
 def plot_comparison(a: dict, b: dict, output_dir: str, ai_adoption: bool = False) -> None:
     try:
