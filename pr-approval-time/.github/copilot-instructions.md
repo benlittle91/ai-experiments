@@ -22,8 +22,8 @@ chmod +x pr_approval_time.sh pr_metrics.py
 # Save a snapshot for later comparison:
 ./pr_approval_time.sh --no-jira --from 2026-01-01 --to 2026-01-31 --save-json jan2026.json
 
-# Compare two or more snapshots (prints tables; optional --no-plot skips matplotlib):
-python3 pr_compare.py jan2026.json feb2026.json --no-plot
+# Compare two snapshots (prints comparison tables):
+python3 pr_compare.py jan2026.json feb2026.json
 ```
 
 ---
@@ -34,7 +34,8 @@ python3 pr_compare.py jan2026.json feb2026.json --no-plot
 - `pr_metrics.py` — analytics engine and snapshot writer: datetime math, percentiles, grouped stats, and `--save-json` output.
 - `stats.py` — shared percentile / summary-stats helpers imported by both Python modules. Unit-tested in `test_stats.py`.
 - `models.py` — typed dataclasses (`Snapshot`, `Period`, `StatBundle`, `RepoStat`, `SpGroup`) describing the on-disk snapshot JSON contract.
-- `pr_compare.py` — reads two or more snapshot JSON files (via `Snapshot.load()`) and renders period-over-period comparisons + optional matplotlib charts.
+- `pr_compare.py` — thin CLI: loads two snapshots via `Snapshot.load()` and delegates rendering to `report.py`.
+- `report.py` — text rendering of executive / delivery-leads / detailed comparison sections.
 
 This split is intentional: keep shell scripting simple, keep numeric logic maintainable and testable in Python.
 
@@ -49,7 +50,7 @@ This split is intentional: keep shell scripting simple, keep numeric logic maint
 ## Dependencies
 
 Required: `bash`, `gh`, `jq`, `python3`, `awk`.
-Optional: `jira` CLI (story-point enrichment only), `matplotlib` (charts in `pr_compare.py` — pass `--no-plot` to skip).
+Optional: `jira` CLI (story-point enrichment only).
 
 ---
 
