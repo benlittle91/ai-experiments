@@ -11,24 +11,12 @@ import json
 import sys
 from collections import defaultdict
 from datetime import datetime
-from math import ceil, floor
+
+from stats import percentile, summary_stats
 
 
 def parse_iso(ts: str) -> datetime:
     return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-
-
-def pct(sorted_vals: list[float], percentile: float) -> float | None:
-    if not sorted_vals:
-        return None
-    if len(sorted_vals) == 1:
-        return sorted_vals[0]
-    k = (len(sorted_vals) - 1) * (percentile / 100.0)
-    f = floor(k)
-    c = ceil(k)
-    if f == c:
-        return sorted_vals[int(k)]
-    return sorted_vals[f] * (c - k) + sorted_vals[c] * (k - f)
 
 
 def fmt_num(value: float | None) -> str:
@@ -69,8 +57,8 @@ def cmd_file_stats(args: argparse.Namespace) -> int:
 
     vals.sort()
     avg = sum(vals) / len(vals)
-    med = pct(vals, 50)
-    p75 = pct(vals, 75)
+    med = percentile(vals, 50)
+    p75 = percentile(vals, 75)
     print(f"{avg:.2f}\t{med:.2f}\t{p75:.2f}")
     return 0
 
@@ -117,10 +105,10 @@ def cmd_grouped_storypoints(args: argparse.Namespace) -> int:
     for sp in sorted(groups.keys(), key=sort_key):
         days_vals = sorted(groups[sp]["days"])
         dsp_vals = sorted(groups[sp]["dsp"])
-        med_days = pct(days_vals, 50)
-        p75_days = pct(days_vals, 75)
-        med_dsp = pct(dsp_vals, 50)
-        p75_dsp = pct(dsp_vals, 75)
+        med_days = percentile(days_vals, 50)
+        p75_days = percentile(days_vals, 75)
+        med_dsp = percentile(dsp_vals, 50)
+        p75_dsp = percentile(dsp_vals, 75)
         print(
             f"  {sp:<8}  {len(days_vals):>5}  {fmt_num(med_days):>11}  {fmt_num(p75_days):>8}  "
             f"{fmt_num(med_dsp):>11}  {fmt_num(p75_dsp):>9}"
@@ -150,17 +138,6 @@ def _read_floats(path: str) -> list[float]:
                 except ValueError:
                     pass
     return vals
-
-
-def _stats_dict(vals: list[float]) -> dict:
-    if not vals:
-        return {"avg": None, "median": None, "p75": None}
-    s = sorted(vals)
-    return {
-        "avg": round(sum(s) / len(s), 4),
-        "median": round(pct(s, 50), 4),
-        "p75": round(pct(s, 75), 4),
-    }
 
 
 def cmd_save_snapshot(args: argparse.Namespace) -> int:
@@ -215,13 +192,13 @@ def cmd_save_snapshot(args: argparse.Namespace) -> int:
         dsp = sorted(data["dsp"])
         sp_out[sp] = {
             "count": len(d),
-            "median_days": round(pct(d, 50), 4) if d else None,
-            "p75_days": round(pct(d, 75), 4) if d else None,
+            "median_days": round(percentile(d, 50), 4) if d else None,
+            "p75_days": round(percentile(d, 75), 4) if d else None,
             "avg_days": round(sum(d) / len(d), 4) if d else None,
             "min_days": round(min(d), 4) if d else None,
             "max_days": round(max(d), 4) if d else None,
-            "median_dsp": round(pct(dsp, 50), 4) if dsp else None,
-            "p75_dsp": round(pct(dsp, 75), 4) if dsp else None,
+            "median_dsp": round(percentile(dsp, 50), 4) if dsp else None,
+            "p75_dsp": round(percentile(dsp, 75), 4) if dsp else None,
         }
 
     snapshot = {
@@ -234,8 +211,8 @@ def cmd_save_snapshot(args: argparse.Namespace) -> int:
             "excluded_no_sp": int(args.excluded_no_sp),
         },
         "stats": {
-            "days": _stats_dict(all_days),
-            "days_per_sp": _stats_dict(all_dsp),
+            "days": summary_stats(all_days),
+            "days_per_sp": summary_stats(all_dsp),
         },
         "raw_days": [round(d, 4) for d in all_days],
         "repos": repos,
