@@ -16,44 +16,17 @@ JIRA_SP_FIELD="customfield_10715"
 NO_JIRA=0
 GROUP_BY_STORY_POINTS=1
 MAX_REPOS=""
+SAVE_JSON=""
 
 BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPOS_DIR="$(cd "$(dirname "$0")/../../gam" && pwd)"
 METRICS_PY="$BASE_DIR/pr_metrics.py"
 
-REPOS=(
-  global-alert-monitor-ui
-  global-alert-monitor-ui-automation-tests
-  gst-risk-gam-alert-adaptor-service
-  gst-risk-gam-alert-adaptor-service-infra
-  gst-risk-gam-alert-db-infra
-  gst-risk-gam-alert-db-library
-  gst-risk-gam-alert-distribution-service
-  gst-risk-gam-alert-distribution-service-infra
-  gst-risk-gam-alert-raised-connector
-  gst-risk-gam-alert-raised-connector-infra
-  gst-risk-gam-alert-service
-  gst-risk-gam-alert-service-infra
-  gst-risk-gam-alertrule-connector
-  gst-risk-gam-alertrule-connector-infra
-  gst-risk-gam-bet-alerts-service
-  gst-risk-gam-bet-alerts-service-infra
-  gst-risk-gam-common-infra
-  gst-risk-gam-deduplication-service
-  gst-risk-gam-deduplication-service-infra
-  gst-risk-gam-disposal-service
-  gst-risk-gam-disposal-service-infra
-  gst-risk-gam-external-alerts-service
-  gst-risk-gam-external-alerts-service-infra
-  gst-risk-gam-gbs-adaptor-service
-  gst-risk-gam-gbs-adaptor-service-infra
-  gst-risk-gam-kafkaconnect-alertrule-connector-infra
-  gst-risk-gam-model
-  gst-risk-gam-model-filtering-library
-  gst-risk-gam-routing-config-map
-  gst-risk-gam-routing-config-map-infra
-  gst-risk-gam-test-suite
-  gst-risk-gam-webui-infra
-)
+REPOS=()
+for _repo_dir in "$REPOS_DIR"/*/; do
+  [[ -d "${_repo_dir}.git" ]] && REPOS+=("$(basename "$_repo_dir")")
+done
+unset _repo_dir
 
 die() {
   echo "ERROR: $*" >&2
@@ -64,7 +37,7 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./pr_approval_time.sh [weeks]
-  ./pr_approval_time.sh --from YYYY-MM-DD --to YYYY-MM-DD [--jira-sp-field customfield_12345] [--no-jira] [--group-by-story-points|--no-group-by-story-points] [--max-repos N]
+  ./pr_approval_time.sh --from YYYY-MM-DD --to YYYY-MM-DD [--jira-sp-field customfield_12345] [--no-jira] [--group-by-story-points|--no-group-by-story-points] [--max-repos N] [--save-json FILE]
 
 Notes:
   - Date filtering uses merged PR dates.
@@ -80,7 +53,7 @@ require_option_value() {
   fi
 }
 
-check_dependency() {
+require_command() {
   local dep="$1"
   command -v "$dep" >/dev/null 2>&1 || die "Missing dependency '$dep'"
 }
@@ -94,7 +67,7 @@ date_weeks_ago() {
   fi
 }
 
-calc_duration() {
+hours_and_days_between() {
   python3 "$METRICS_PY" calc-duration "$1" "$2"
 }
 
@@ -106,7 +79,7 @@ num_div() {
   python3 "$METRICS_PY" num-div "$1" "$2"
 }
 
-file_stats() {
+days_stats_from_file() {
   python3 "$METRICS_PY" file-stats "$1"
 }
 
@@ -119,16 +92,18 @@ setup_temp_files() {
   ALL_DAYS_FILE=$(mktemp "$BASE_DIR/.pr_approval_days.XXXXXX")
   ALL_DAYS_PER_SP_FILE=$(mktemp "$BASE_DIR/.pr_approval_days_per_sp.XXXXXX")
   STORYPOINT_TABLE_FILE=$(mktemp "$BASE_DIR/.pr_approval_storypoint_rows.XXXXXX")
+  PER_REPO_FILE=$(mktemp "$BASE_DIR/.pr_approval_per_repo.XXXXXX")
 
   : > "$JIRA_CACHE_FILE"
   : > "$ALL_DAYS_FILE"
   : > "$ALL_DAYS_PER_SP_FILE"
   : > "$STORYPOINT_TABLE_FILE"
+  : > "$PER_REPO_FILE"
 
-  trap 'rm -f "$JIRA_CACHE_FILE" "$ALL_DAYS_FILE" "$ALL_DAYS_PER_SP_FILE" "$STORYPOINT_TABLE_FILE"' EXIT
+  trap 'rm -f "$JIRA_CACHE_FILE" "$ALL_DAYS_FILE" "$ALL_DAYS_PER_SP_FILE" "$STORYPOINT_TABLE_FILE" "$PER_REPO_FILE"' EXIT
 }
 
-get_jira_metadata() {
+fetch_story_points() {
   local issue_key="$1"
   local cached_line
   cached_line=$(grep -E "^${issue_key}[[:space:]]" "$JIRA_CACHE_FILE" | head -1 || true)
@@ -140,6 +115,7 @@ get_jira_metadata() {
   local raw sp
   raw=$(jira issue view "$issue_key" --raw 2>/dev/null || true)
   if [[ -z "$raw" ]]; then
+    echo "  WARN: jira issue view $issue_key returned no data (auth issue, or ticket not found)" >&2
     printf "%s\t\n" "$issue_key" >> "$JIRA_CACHE_FILE"
     echo ""
     return 0
@@ -176,6 +152,9 @@ parse_args() {
       --max-repos)
         require_option_value "$1" "${2-}"
         MAX_REPOS="$2"; shift 2 ;;
+      --save-json)
+        require_option_value "$1" "${2-}"
+        SAVE_JSON="$2"; shift 2 ;;
       --help|-h)
         usage; exit 0 ;;
       --*)
@@ -206,7 +185,7 @@ resolve_period() {
 
 validate_config() {
   for dep in gh jq python3 awk; do
-    check_dependency "$dep"
+    require_command "$dep"
   done
 
   if [[ ! -f "$METRICS_PY" ]]; then
@@ -248,7 +227,7 @@ print_header() {
 
 process_repo() {
   local repo="$1"
-  local repo_dir="$BASE_DIR/$repo"
+  local repo_dir="$REPOS_DIR/$repo"
 
   if [[ ! -d "$repo_dir" ]]; then
     echo ""
@@ -263,7 +242,8 @@ process_repo() {
     --state merged \
     --search "merged:>=$SINCE_DATE merged:<=$UNTIL_DATE" \
     --json number,createdAt,mergedAt,title,url,headRefName,body \
-    --limit 500 2>/dev/null || echo "[]")
+    --limit 500 2>/dev/null) \
+    || { echo "  WARN: gh pr list failed for $repo (empty period will be reported)" >&2; pr_json="[]"; }
 
   local pr_count
   pr_count=$(echo "$pr_json" | jq 'length')
@@ -271,6 +251,7 @@ process_repo() {
   if [[ "$pr_count" -eq 0 ]]; then
     popd >/dev/null
     summary_rows+=("$(printf "  %-55s  %4d  %4d  %4d  %4d  %4d  %s" "$repo" 0 0 0 0 0 "—")")
+    printf "%s\t%d\t%d\t%d\t%d\t%d\t%s\n" "$repo" 0 0 0 0 0 "—" >> "$PER_REPO_FILE"
     return
   fi
 
@@ -300,13 +281,13 @@ process_repo() {
     if [[ "$NO_JIRA" -eq 0 ]]; then
       jira_key=$(extract_jira_key "$pr_title" "$head_ref" "$pr_body")
       if [[ -n "$jira_key" ]]; then
-        story_points=$(get_jira_metadata "$jira_key")
+        story_points=$(fetch_story_points "$jira_key")
       fi
     fi
 
     reviews_json=$(gh pr view "$pr_num" --json reviews 2>/dev/null \
-      | jq '[.reviews[] | select(.state == "APPROVED" and .author.login != null) | {author: .author.login, submittedAt: .submittedAt}] | sort_by(.submittedAt) | unique_by(.author)' 2>/dev/null \
-      || echo '[]')
+      | jq '[.reviews[] | select(.state == "APPROVED" and .author.login != null) | {author: .author.login, submittedAt: .submittedAt}] | sort_by(.submittedAt) | unique_by(.author)' 2>/dev/null) \
+      || { echo "  WARN: could not fetch reviews for PR #$pr_num in $repo (treating as 0 approvals)" >&2; reviews_json='[]'; }
 
     unique_approvals=$(echo "$reviews_json" | jq 'length')
 
@@ -320,7 +301,7 @@ process_repo() {
     repo_approved=$((repo_approved + 1))
     second_approval=$(echo "$reviews_json" | jq -r '.[1].submittedAt')
 
-    duration=$(calc_duration "$created_at" "$second_approval")
+    duration=$(hours_and_days_between "$created_at" "$second_approval")
     hours=$(echo "$duration" | cut -f1)
     days=$(echo "$duration" | cut -f2)
 
@@ -369,6 +350,10 @@ process_repo() {
   summary_rows+=("$(printf "  %-55s  %4d  %4d  %4d  %4d  %4d  %s" \
     "$repo" "$pr_count" "$repo_approved" "$repo_excluded_lt2" "$repo_excluded_no_jira" "$repo_excluded_no_sp" "${repo_avg} days")")
 
+  printf "%s\t%d\t%d\t%d\t%d\t%d\t%s\n" \
+    "$repo" "$pr_count" "$repo_approved" "$repo_excluded_lt2" \
+    "$repo_excluded_no_jira" "$repo_excluded_no_sp" "$repo_avg" >> "$PER_REPO_FILE"
+
   popd >/dev/null
 }
 
@@ -399,12 +384,12 @@ main() {
     process_repo "$REPO"
   done
 
-  raw_stats=$(file_stats "$ALL_DAYS_FILE")
+  raw_stats=$(days_stats_from_file "$ALL_DAYS_FILE")
   raw_avg=$(echo "$raw_stats" | cut -f1)
   raw_median=$(echo "$raw_stats" | cut -f2)
   raw_p75=$(echo "$raw_stats" | cut -f3)
 
-  sp_stats=$(file_stats "$ALL_DAYS_PER_SP_FILE")
+  sp_stats=$(days_stats_from_file "$ALL_DAYS_PER_SP_FILE")
   sp_avg=$(echo "$sp_stats" | cut -f1)
   sp_median=$(echo "$sp_stats" | cut -f2)
   sp_p75=$(echo "$sp_stats" | cut -f3)
@@ -433,7 +418,7 @@ main() {
   echo "════════════════════════════════════════════════════════════════"
   printf "  %-55s  %4s  %4s  %4s  %4s  %4s  %s\n" "Repository" "Ttl" "2+" "<2" "NoJ" "NoSP" "Avg time"
   echo "  ────────────────────────────────────────────────────────────────────────────────────"
-  for row in "${summary_rows[@]}"; do
+  for row in "${summary_rows[@]+"${summary_rows[@]}"}"; do
     echo "$row"
   done
   echo "  ────────────────────────────────────────────────────────────────────────────────────"
@@ -483,6 +468,23 @@ main() {
   echo "  reverts, or snapshot-removal commits where branch protection"
   echo "  was overridden after the substantive change was already reviewed."
   echo ""
+
+  if [[ -n "$SAVE_JSON" ]]; then
+    python3 "$METRICS_PY" save-snapshot \
+      --from "$SINCE_DATE" \
+      --to "$UNTIL_DATE" \
+      --total-examined "$total_examined" \
+      --total-approved "$total_approved" \
+      --excluded-lt2 "$total_excluded_lt2" \
+      --excluded-no-jira "$total_excluded_no_jira" \
+      --excluded-no-sp "$total_excluded_no_sp" \
+      --days-file "$ALL_DAYS_FILE" \
+      --dsp-file "$ALL_DAYS_PER_SP_FILE" \
+      --sp-table "$STORYPOINT_TABLE_FILE" \
+      --repo-file "$PER_REPO_FILE" \
+      --output "$SAVE_JSON"
+    echo " Snapshot saved: $SAVE_JSON"
+  fi
 }
 
 main "$@"

@@ -10,21 +10,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
+from models import Snapshot, SpGroup
 from stats import iqr_bounds, split_outliers, summary_stats
 
 # SP buckets with fewer than this many PRs are flagged as low-confidence.
 # A median/avg from 1–2 data points is statistically meaningless and can
 # swing wildly between periods due to a single outlier PR.
 MIN_SP_COUNT = 5
-
-
-def load(path: str) -> dict:
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
 
 
 def _fmt(val: float | None, decimals: int = 2) -> str:
@@ -56,34 +51,30 @@ def _trend_word(delta: float | None, lower_is_better: bool = True) -> str:
     return "improved" if delta > 0 else "worsened"
 
 
-def _period_labels(a: dict, b: dict, ai_adoption: bool) -> tuple[str, str]:
-    pa, pb = a["period"], b["period"]
+def _period_labels(a: Snapshot, b: Snapshot, ai_adoption: bool) -> tuple[str, str]:
+    pa, pb = a.period, b.period
     if ai_adoption:
         return (
-            f"{pa['from']} to {pa['to']} (pre-AI baseline, human-only reviews)",
-            f"{pb['from']} to {pb['to']} (post-AI adoption, Copilot on every PR)",
+            f"{pa.from_} to {pa.to} (pre-AI baseline, human-only reviews)",
+            f"{pb.from_} to {pb.to} (post-AI adoption, Copilot on every PR)",
         )
-    return f"{pa['from']} to {pa['to']}", f"{pb['from']} to {pb['to']}"
+    return f"{pa.from_} to {pa.to}", f"{pb.from_} to {pb.to}"
 
 
-def render_ai_impact_summary(a: dict, b: dict) -> str:
-    """Print an AI adoption-specific impact narrative."""
+def render_ai_impact_summary(a: Snapshot, b: Snapshot) -> str:
+    """Render an AI adoption-specific impact narrative."""
     lines: list[str] = []
-    pa, pb = a["period"], b["period"]
-    label_a = f"{pa['from']} to {pa['to']}"
-    label_b = f"{pb['from']} to {pb['to']}"
+    label_a = f"{a.period.from_} to {a.period.to}"
+    label_b = f"{b.period.from_} to {b.period.to}"
 
-    sa, sb = a["stats"]["days"], b["stats"]["days"]
-    med_a, med_b = sa.get("median"), sb.get("median")
-    p75_a, p75_b = sa.get("p75"), sb.get("p75")
-    avg_a, avg_b = sa.get("avg"), sb.get("avg")
+    med_a, med_b = a.days.median, b.days.median
+    p75_a, p75_b = a.days.p75, b.days.p75
+    avg_a, avg_b = a.days.avg, b.days.avg
 
-    dpa, dpb = a["stats"]["days_per_sp"], b["stats"]["days_per_sp"]
-    dsp_med_a, dsp_med_b = dpa.get("median"), dpb.get("median")
+    dsp_med_a, dsp_med_b = a.days_per_sp.median, b.days_per_sp.median
 
-    sma, smb = a["summary"], b["summary"]
-    vol_a, vol_b = sma.get("total_examined", 0), smb.get("total_examined", 0)
-    apr_a, apr_b = sma.get("total_approved", 0), smb.get("total_approved", 0)
+    vol_a, vol_b = a.summary.total_examined, b.summary.total_examined
+    apr_a, apr_b = a.summary.total_approved, b.summary.total_approved
 
     lines.append("")
     lines.append("════════════════════════════════════════════════════════════════════════")
@@ -185,26 +176,23 @@ def render_ai_impact_summary(a: dict, b: dict) -> str:
     lines.append("")
     return "\n".join(lines)
 
-def render_executive_summary(a: dict, b: dict, ai_adoption: bool = False) -> str:
-    """Print a concise executive and leadership summary in plain prose."""
+def render_executive_summary(a: Snapshot, b: Snapshot, ai_adoption: bool = False) -> str:
+    """Render a concise executive and leadership summary in plain prose."""
     lines: list[str] = []
     label_a, label_b = _period_labels(a, b, ai_adoption)
 
-    sma, smb = a["summary"], b["summary"]
-    sa, sb = a["stats"]["days"], b["stats"]["days"]
-
-    med_a, med_b = sa.get("median"), sb.get("median")
-    avg_a, avg_b = sa.get("avg"), sb.get("avg")
-    p75_a, p75_b = sa.get("p75"), sb.get("p75")
+    med_a, med_b = a.days.median, b.days.median
+    avg_a, avg_b = a.days.avg, b.days.avg
+    p75_a, p75_b = a.days.p75, b.days.p75
 
     med_delta = (med_b - med_a) if med_a is not None and med_b is not None else None
     avg_delta = (avg_b - avg_a) if avg_a is not None and avg_b is not None else None
     p75_delta = (p75_b - p75_a) if p75_a is not None and p75_b is not None else None
 
-    vol_a = sma.get("total_examined", 0)
-    vol_b = smb.get("total_examined", 0)
-    apr_a = sma.get("total_approved", 0)
-    apr_b = smb.get("total_approved", 0)
+    vol_a = a.summary.total_examined
+    vol_b = b.summary.total_examined
+    apr_a = a.summary.total_approved
+    apr_b = b.summary.total_approved
     vol_delta = vol_b - vol_a
 
     lines.append("")
@@ -276,8 +264,7 @@ def render_executive_summary(a: dict, b: dict, ai_adoption: bool = False) -> str
         )
 
     # Effort-adjusted metric
-    dpa, dpb = a["stats"]["days_per_sp"], b["stats"]["days_per_sp"]
-    dsp_med_a, dsp_med_b = dpa.get("median"), dpb.get("median")
+    dsp_med_a, dsp_med_b = a.days_per_sp.median, b.days_per_sp.median
     if dsp_med_a is not None and dsp_med_b is not None:
         dsp_delta = dsp_med_b - dsp_med_a
         trend = _trend_word(dsp_delta)
@@ -300,16 +287,14 @@ def render_executive_summary(a: dict, b: dict, ai_adoption: bool = False) -> str
     lines.append("")
     return "\n".join(lines)
 
-def render_delivery_leads_summary(a: dict, b: dict, ai_adoption: bool = False) -> str:
-    """Print an operational summary for delivery leads: per-repository movements,
+def render_delivery_leads_summary(a: Snapshot, b: Snapshot, ai_adoption: bool = False) -> str:
+    """Render an operational summary for delivery leads: per-repository movements,
     story point trends, and data coverage observations."""
     lines: list[str] = []
     label_a, label_b = _period_labels(a, b, ai_adoption)
 
-    sma, smb = a["summary"], b["summary"]
-
-    repos_a = {r["name"]: r for r in a.get("repos", [])}
-    repos_b = {r["name"]: r for r in b.get("repos", [])}
+    repos_a = {r.name: r for r in a.repos}
+    repos_b = {r.name: r for r in b.repos}
     all_repos = sorted(set(repos_a) | set(repos_b))
 
     # Repositories that gained or lost data between periods
@@ -319,16 +304,16 @@ def render_delivery_leads_summary(a: dict, b: dict, ai_adoption: bool = False) -
     # Compute per-repository deltas where both periods have data
     repo_deltas: list[tuple[str, float, float, float]] = []  # (name, avg_a, avg_b, delta)
     for repo in all_repos:
-        avg_a = repos_a.get(repo, {}).get("avg_days")
-        avg_b = repos_b.get(repo, {}).get("avg_days")
+        avg_a = repos_a[repo].avg_days if repo in repos_a else None
+        avg_b = repos_b[repo].avg_days if repo in repos_b else None
         if avg_a is not None and avg_b is not None:
             repo_deltas.append((repo, avg_a, avg_b, avg_b - avg_a))
 
     most_improved = sorted(repo_deltas, key=lambda x: x[3])[:3]
     most_worsened = sorted(repo_deltas, key=lambda x: x[3], reverse=True)[:3]
 
-    sp_a = a.get("storypoint_groups", {})
-    sp_b = b.get("storypoint_groups", {})
+    sp_a = a.storypoint_groups
+    sp_b = b.storypoint_groups
     all_sp = sorted(
         set(sp_a) | set(sp_b),
         key=lambda x: (0, float(x)) if x.replace(".", "", 1).isdigit() else (1, x),
@@ -388,10 +373,10 @@ def render_delivery_leads_summary(a: dict, b: dict, ai_adoption: bool = False) -
         sp_deltas: list[tuple[str, float, float, float, int, int]] = []
         low_confidence_sp: list[str] = []
         for sp in all_sp:
-            cnt_a = sp_a.get(sp, {}).get("count", 0)
-            cnt_b = sp_b.get(sp, {}).get("count", 0)
-            med_a = sp_a.get(sp, {}).get("median_days")
-            med_b = sp_b.get(sp, {}).get("median_days")
+            cnt_a = sp_a.get(sp, SpGroup()).count
+            cnt_b = sp_b.get(sp, SpGroup()).count
+            med_a = sp_a.get(sp, SpGroup()).median_days
+            med_b = sp_b.get(sp, SpGroup()).median_days
             if med_a is not None and med_b is not None:
                 if cnt_a < MIN_SP_COUNT or cnt_b < MIN_SP_COUNT:
                     low_confidence_sp.append(sp)
@@ -426,10 +411,10 @@ def render_delivery_leads_summary(a: dict, b: dict, ai_adoption: bool = False) -
                 f" outliers, not a genuine pattern:"
             )
             for sp in low_confidence_sp:
-                cnt_a = sp_a.get(sp, {}).get("count", 0)
-                cnt_b = sp_b.get(sp, {}).get("count", 0)
-                med_a = sp_a.get(sp, {}).get("median_days")
-                med_b = sp_b.get(sp, {}).get("median_days")
+                cnt_a = sp_a.get(sp, SpGroup()).count
+                cnt_b = sp_b.get(sp, SpGroup()).count
+                med_a = sp_a.get(sp, SpGroup()).median_days
+                med_b = sp_b.get(sp, SpGroup()).median_days
                 lines.append(
                     f"    {sp}-point work: {_fmt(med_a)} → {_fmt(med_b)} days"
                     f" (n={cnt_a} in Period A, n={cnt_b} in Period B)"
@@ -437,12 +422,12 @@ def render_delivery_leads_summary(a: dict, b: dict, ai_adoption: bool = False) -
             lines.append("")
 
     # --- Exclusion / data quality notes ---
-    exc_no_jira_a = sma.get("excluded_no_jira", 0)
-    exc_no_jira_b = smb.get("excluded_no_jira", 0)
-    exc_no_sp_a = sma.get("excluded_no_sp", 0)
-    exc_no_sp_b = smb.get("excluded_no_sp", 0)
-    exc_lt2_a = sma.get("excluded_lt2", 0)
-    exc_lt2_b = smb.get("excluded_lt2", 0)
+    exc_no_jira_a = a.summary.excluded_no_jira
+    exc_no_jira_b = b.summary.excluded_no_jira
+    exc_no_sp_a = a.summary.excluded_no_sp
+    exc_no_sp_b = b.summary.excluded_no_sp
+    exc_lt2_a = a.summary.excluded_lt2
+    exc_lt2_b = b.summary.excluded_lt2
 
     any_exclusions = any([exc_no_jira_a, exc_no_jira_b, exc_no_sp_a, exc_no_sp_b, exc_lt2_a, exc_lt2_b])
     if any_exclusions:
@@ -465,7 +450,7 @@ def render_delivery_leads_summary(a: dict, b: dict, ai_adoption: bool = False) -
         lines.append("")
     return "\n".join(lines)
 
-def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
+def render_comparison(a: Snapshot, b: Snapshot, ai_adoption: bool = False) -> str:
     lines: list[str] = []
     label_a, label_b = _period_labels(a, b, ai_adoption)
     col_a = "Baseline" if ai_adoption else "Period A"
@@ -479,31 +464,30 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
     lines.append("════════════════════════════════════════════════════════════════════════")
 
     # --- Volume ---
-    sma, smb = a["summary"], b["summary"]
     lines.append("")
     lines.append("  VOLUME")
     lines.append(f"  {'Metric':<26}  {col_a:>10}  {col_b:>10}  {'Change':>10}")
     lines.append("  " + "─" * 62)
-    for key, label in [
+    for attr, label in [
         ("total_examined", "PRs examined"),
         ("total_approved", "PRs w/ 2+ approvals"),
         ("excluded_lt2", "Excluded (<2 approvals)"),
         ("excluded_no_jira", "Excluded (no Jira key)"),
         ("excluded_no_sp", "Excluded (no story pts)"),
     ]:
-        va, vb = sma.get(key, 0), smb.get(key, 0)
+        va, vb = getattr(a.summary, attr), getattr(b.summary, attr)
         lines.append(f"  {label:<26}  {va:>10}  {vb:>10}  {_delta_int(va, vb):>10}")
 
     # --- Days to 2nd approval (with optional clean stats when raw_days available) ---
-    sa, sb = a["stats"]["days"], b["stats"]["days"]
-    raw_a: list[float] = a.get("raw_days", [])
-    raw_b: list[float] = b.get("raw_days", [])
+    raw_a: list[float] = a.raw_days
+    raw_b: list[float] = b.raw_days
     clean_a, outliers_a = split_outliers(raw_a) if raw_a else ([], [])
     clean_b, outliers_b = split_outliers(raw_b) if raw_b else ([], [])
     has_outliers = bool(outliers_a or outliers_b)
     clean_stats_a = summary_stats(clean_a) if clean_a else None
     clean_stats_b = summary_stats(clean_b) if clean_b else None
 
+    sa, sb = a.days.as_dict(), b.days.as_dict()
     lines.append("")
     lines.append("  TIME TO 2ND APPROVAL (days) — ALL PRs")
     lines.append(f"  {'Metric':<10}  {col_a:>10}  {col_b:>10}  {'Change':>10}")
@@ -534,7 +518,7 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
             )
 
     # --- Days per story point (only if at least one period has data) ---
-    dpa, dpb = a["stats"]["days_per_sp"], b["stats"]["days_per_sp"]
+    dpa, dpb = a.days_per_sp.as_dict(), b.days_per_sp.as_dict()
     has_dsp = any(v is not None for v in list(dpa.values()) + list(dpb.values()))
     if has_dsp:
         lines.append("")
@@ -565,8 +549,8 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
         lines.append("  debt, blocked work, or branches held open across multiple sprints.")
 
     # --- Per-repo avg ---
-    repos_a = {r["name"]: r for r in a.get("repos", [])}
-    repos_b = {r["name"]: r for r in b.get("repos", [])}
+    repos_a = {r.name: r for r in a.repos}
+    repos_b = {r.name: r for r in b.repos}
     all_repos = sorted(set(repos_a) | set(repos_b))
 
     if all_repos:
@@ -579,14 +563,17 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
         # enough repos with data to make the detection meaningful.
         all_repo_avgs = [
             v for r in all_repos
-            for v in [repos_a.get(r, {}).get("avg_days"), repos_b.get(r, {}).get("avg_days")]
+            for v in [
+                repos_a[r].avg_days if r in repos_a else None,
+                repos_b[r].avg_days if r in repos_b else None,
+            ]
             if v is not None
         ]
         _, repo_outlier_upper = iqr_bounds(all_repo_avgs) if len(all_repo_avgs) >= 4 else (None, float("inf"))
 
         for repo in all_repos:
-            avg_a = repos_a.get(repo, {}).get("avg_days")
-            avg_b = repos_b.get(repo, {}).get("avg_days")
+            avg_a = repos_a[repo].avg_days if repo in repos_a else None
+            avg_b = repos_b[repo].avg_days if repo in repos_b else None
             is_outlier = (avg_a is not None and avg_a > repo_outlier_upper) or \
                          (avg_b is not None and avg_b > repo_outlier_upper)
             flag = "  ⚠ outlier" if is_outlier else ""
@@ -596,8 +583,8 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
             )
 
     # --- Story point groups ---
-    sp_a = a.get("storypoint_groups", {})
-    sp_b = b.get("storypoint_groups", {})
+    sp_a = a.storypoint_groups
+    sp_b = b.storypoint_groups
     all_sp = sorted(
         set(sp_a) | set(sp_b),
         key=lambda x: (0, float(x)) if x.replace(".", "", 1).isdigit() else (1, x),
@@ -605,7 +592,7 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
     if all_sp:
         # Only show range columns if at least one SP group in either snapshot has min/max data
         has_ranges = any(
-            sp_a.get(sp, {}).get("min_days") is not None or sp_b.get(sp, {}).get("min_days") is not None
+            sp_a.get(sp, SpGroup()).min_days is not None or sp_b.get(sp, SpGroup()).min_days is not None
             for sp in all_sp
         )
         lines.append("")
@@ -617,22 +604,22 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
             lines.append(f"  {'SP':<8}  {col_a:>10}  {col_b:>10}  {'Change':>10}  {'Count A':>8}  {'Count B':>8}  Note")
             lines.append("  " + "─" * 80)
         for sp in all_sp:
-            ga = sp_a.get(sp, {})
-            gb = sp_b.get(sp, {})
-            med_a = ga.get("median_days")
-            med_b = gb.get("median_days")
-            cnt_a = ga.get("count", 0)
-            cnt_b = gb.get("count", 0)
+            ga = sp_a.get(sp, SpGroup())
+            gb = sp_b.get(sp, SpGroup())
+            med_a = ga.median_days
+            med_b = gb.median_days
+            cnt_a = ga.count
+            cnt_b = gb.count
             low = cnt_a < MIN_SP_COUNT or cnt_b < MIN_SP_COUNT
             note = f"⚠ low n ({cnt_a}/{cnt_b})" if low else ""
             if has_ranges:
                 range_a = (
                     f" [{_fmt(ga.get('min_days'))}–{_fmt(ga.get('max_days'))}]"
-                    if ga.get("min_days") is not None else ""
+                    if ga.min_days is not None else ""
                 )
                 range_b = (
                     f" [{_fmt(gb.get('min_days'))}–{_fmt(gb.get('max_days'))}]"
-                    if gb.get("min_days") is not None else ""
+                    if gb.min_days is not None else ""
                 )
                 cell_a = f"{_fmt(med_a)}{range_a}"
                 cell_b = f"{_fmt(med_b)}{range_b}"
@@ -648,8 +635,8 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
 
     # --- Story point groups — days per SP ---
     has_dsp_groups = any(
-        sp_a.get(sp, {}).get("median_dsp") is not None
-        or sp_b.get(sp, {}).get("median_dsp") is not None
+        sp_a.get(sp, SpGroup()).median_dsp is not None
+        or sp_b.get(sp, SpGroup()).median_dsp is not None
         for sp in all_sp
     )
     if all_sp and has_dsp_groups:
@@ -658,12 +645,12 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
         lines.append(f"  {'SP':<8}  {col_a:>10}  {col_b:>10}  {'Change':>10}  {'Count A':>8}  {'Count B':>8}  Note")
         lines.append("  " + "─" * 80)
         for sp in all_sp:
-            ga = sp_a.get(sp, {})
-            gb = sp_b.get(sp, {})
-            med_a = ga.get("median_dsp")
-            med_b = gb.get("median_dsp")
-            cnt_a = ga.get("count", 0)
-            cnt_b = gb.get("count", 0)
+            ga = sp_a.get(sp, SpGroup())
+            gb = sp_b.get(sp, SpGroup())
+            med_a = ga.median_dsp
+            med_b = gb.median_dsp
+            cnt_a = ga.count
+            cnt_b = gb.count
             low = cnt_a < MIN_SP_COUNT or cnt_b < MIN_SP_COUNT
             note = f"⚠ low n ({cnt_a}/{cnt_b})" if low else ""
             lines.append(
@@ -674,7 +661,7 @@ def render_comparison(a: dict, b: dict, ai_adoption: bool = False) -> str:
     lines.append("")
     return "\n".join(lines)
 
-def plot_comparison(a: dict, b: dict, output_dir: str, ai_adoption: bool = False) -> None:
+def plot_comparison(a: Snapshot, b: Snapshot, output_dir: str, ai_adoption: bool = False) -> None:
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -689,12 +676,12 @@ def plot_comparison(a: dict, b: dict, output_dir: str, ai_adoption: bool = False
     out.mkdir(parents=True, exist_ok=True)
 
     if ai_adoption:
-        label_a = f"Baseline ({a['period']['from']} → {a['period']['to']})"
-        label_b = f"Post-AI ({b['period']['from']} → {b['period']['to']})"
+        label_a = f"Baseline ({a.period.from_} → {a.period.to})"
+        label_b = f"Post-AI ({b.period.from_} → {b.period.to})"
         main_title = "PR Time to 2nd Approval — Pre-AI Baseline vs Post-Copilot Adoption"
     else:
-        label_a = f"{a['period']['from']} → {a['period']['to']}"
-        label_b = f"{b['period']['from']} → {b['period']['to']}"
+        label_a = f"{a.period.from_} → {a.period.to}"
+        label_b = f"{b.period.from_} → {b.period.to}"
         main_title = "PR Time to 2nd Approval — Period Comparison"
     COLOR_A = "#4C72B0"
     COLOR_B = "#DD8452"
@@ -722,7 +709,7 @@ def plot_comparison(a: dict, b: dict, output_dir: str, ai_adoption: bool = False
     stat_keys = [("days", "Days to 2nd Approval"), ("days_per_sp", "Days per Story Point")]
     has_dsp = any(
         v is not None
-        for d in (a["stats"]["days_per_sp"], b["stats"]["days_per_sp"])
+        for d in (a.days_per_sp.as_dict(), b.days_per_sp.as_dict())
         for v in d.values()
     )
     active_stats = stat_keys if has_dsp else stat_keys[:1]
@@ -733,7 +720,8 @@ def plot_comparison(a: dict, b: dict, output_dir: str, ai_adoption: bool = False
     fig.suptitle(main_title, fontsize=14, fontweight="bold")
 
     for ax, (key, title) in zip(axes, active_stats):
-        sa, sb = a["stats"][key], b["stats"][key]
+        sa = getattr(a, key).as_dict()
+        sb = getattr(b, key).as_dict()
         vals_a = [sa.get(m) or 0 for m in metrics]
         vals_b = [sb.get(m) or 0 for m in metrics]
         bars_a = ax.bar(x - width / 2, vals_a, width, label=label_a, color=COLOR_A, alpha=0.85)
@@ -753,8 +741,8 @@ def plot_comparison(a: dict, b: dict, output_dir: str, ai_adoption: bool = False
     print(f"  Saved: {p1}")
 
     # --- Plot 2: Per-repo avg days ---
-    repos_a = {r["name"]: r.get("avg_days") for r in a.get("repos", [])}
-    repos_b = {r["name"]: r.get("avg_days") for r in b.get("repos", [])}
+    repos_a = {r.name: r.avg_days for r in a.repos}
+    repos_b = {r.name: r.avg_days for r in b.repos}
     repos_with_data = sorted(
         r for r in set(repos_a) | set(repos_b)
         if repos_a.get(r) is not None or repos_b.get(r) is not None
@@ -783,8 +771,8 @@ def plot_comparison(a: dict, b: dict, output_dir: str, ai_adoption: bool = False
         print(f"  Saved: {p2}")
 
     # --- Plot 3: Story point groups — median days ---
-    sp_a = a.get("storypoint_groups", {})
-    sp_b = b.get("storypoint_groups", {})
+    sp_a = a.storypoint_groups
+    sp_b = b.storypoint_groups
     all_sp = sorted(
         set(sp_a) | set(sp_b),
         key=lambda x: (0, float(x)) if x.replace(".", "", 1).isdigit() else (1, x),
@@ -792,9 +780,9 @@ def plot_comparison(a: dict, b: dict, output_dir: str, ai_adoption: bool = False
     if all_sp:
         fig, ax = plt.subplots(figsize=(max(8, len(all_sp) * 1.4 + 2), 5))
         x = np.arange(len(all_sp))
-        bars_a = ax.bar(x - width / 2, [sp_a.get(sp, {}).get("median_days") or 0 for sp in all_sp],
+        bars_a = ax.bar(x - width / 2, [sp_a.get(sp, SpGroup()).median_days or 0 for sp in all_sp],
                         width, label=label_a, color=COLOR_A, alpha=0.85)
-        bars_b = ax.bar(x + width / 2, [sp_b.get(sp, {}).get("median_days") or 0 for sp in all_sp],
+        bars_b = ax.bar(x + width / 2, [sp_b.get(sp, SpGroup()).median_days or 0 for sp in all_sp],
                         width, label=label_b, color=COLOR_B, alpha=0.85)
         _annotate_bars(ax, list(bars_a) + list(bars_b))
         ax.set_title("Median Days to 2nd Approval by Story Points", fontsize=13, fontweight="bold")
@@ -811,15 +799,15 @@ def plot_comparison(a: dict, b: dict, output_dir: str, ai_adoption: bool = False
 
     # --- Plot 4: Story point groups — median days per SP ---
     if all_sp and any(
-        sp_a.get(sp, {}).get("median_dsp") is not None
-        or sp_b.get(sp, {}).get("median_dsp") is not None
+        sp_a.get(sp, SpGroup()).median_dsp is not None
+        or sp_b.get(sp, SpGroup()).median_dsp is not None
         for sp in all_sp
     ):
         fig, ax = plt.subplots(figsize=(max(8, len(all_sp) * 1.4 + 2), 5))
         x = np.arange(len(all_sp))
-        bars_a = ax.bar(x - width / 2, [sp_a.get(sp, {}).get("median_dsp") or 0 for sp in all_sp],
+        bars_a = ax.bar(x - width / 2, [sp_a.get(sp, SpGroup()).median_dsp or 0 for sp in all_sp],
                         width, label=label_a, color=COLOR_A, alpha=0.85)
-        bars_b = ax.bar(x + width / 2, [sp_b.get(sp, {}).get("median_dsp") or 0 for sp in all_sp],
+        bars_b = ax.bar(x + width / 2, [sp_b.get(sp, SpGroup()).median_dsp or 0 for sp in all_sp],
                         width, label=label_b, color=COLOR_B, alpha=0.85)
         _annotate_bars(ax, list(bars_a) + list(bars_b))
         ax.set_title("Median Days per Story Point by Story Point Size", fontsize=13, fontweight="bold")
@@ -861,8 +849,8 @@ def main(argv: list[str]) -> int:
 
     args = parser.parse_args(argv)
 
-    a = load(args.snapshot_a)
-    b = load(args.snapshot_b)
+    a = Snapshot.load(args.snapshot_a)
+    b = Snapshot.load(args.snapshot_b)
 
     if args.ai_adoption:
         print(render_ai_impact_summary(a, b))
