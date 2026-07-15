@@ -126,9 +126,34 @@ The script prints:
 - grouped-by-story-points table (if enabled)
 - leadership summary paragraph you can paste directly
 
+## Comparing periods (month-over-month)
+
+Use `pr_compare.py` to diff two snapshots produced with `--save-json`:
+
+```bash
+# Generic period comparison
+python3 pr_compare.py april2026.json may2026.json
+
+# AI adoption framing — use when snapshot_a is the pre-AI baseline
+# and snapshot_b is the first period with Copilot reviewing every PR
+python3 pr_compare.py april2026.json may2026.json --ai-adoption
+
+# Save comparison charts to a directory
+python3 pr_compare.py april2026.json may2026.json --ai-adoption --output-dir ./charts
+
+# Text only, no charts
+python3 pr_compare.py april2026.json may2026.json --ai-adoption --no-plot
+```
+
+The `--ai-adoption` flag:
+- Adds a dedicated **AI Adoption Impact** section at the top with methodology notes and caveats
+- Relabels all tables and charts as "Baseline" vs "Post-AI" instead of "Period A/B"
+- Highlights the p75 (tail) trend as the key signal for AI review benefit
+- Provides "what to watch" guidance for subsequent months
+
 ---
 
-## Design notes
+
 
 - **Bash** handles orchestration (repo traversal, CLI calls, formatting).
 - **Python** handles deterministic analytics (`pr_metrics.py`): datetime math, divisions, percentiles, grouped stats.
