@@ -1,4 +1,4 @@
-"""Rendering helpers for pr_compare — pure text output, no matplotlib.
+"""Rendering helpers for pr_compare — text output for period comparisons.
 
 Every function returns a string; the caller decides when to print.
 """

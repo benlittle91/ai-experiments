@@ -137,17 +137,11 @@ python3 pr_compare.py april2026.json may2026.json
 # AI adoption framing — use when snapshot_a is the pre-AI baseline
 # and snapshot_b is the first period with Copilot reviewing every PR
 python3 pr_compare.py april2026.json may2026.json --ai-adoption
-
-# Save comparison charts to a directory
-python3 pr_compare.py april2026.json may2026.json --ai-adoption --output-dir ./charts
-
-# Text only, no charts
-python3 pr_compare.py april2026.json may2026.json --ai-adoption --no-plot
 ```
 
 The `--ai-adoption` flag:
 - Adds a dedicated **AI Adoption Impact** section at the top with methodology notes and caveats
-- Relabels all tables and charts as "Baseline" vs "Post-AI" instead of "Period A/B"
+- Relabels all tables as "Baseline" vs "Post-AI" instead of "Period A/B"
 - Highlights the p75 (tail) trend as the key signal for AI review benefit
 - Provides "what to watch" guidance for subsequent months
 
