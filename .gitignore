@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# pr-approval-time: real team data snapshots (may contain PR titles/URLs)
+pr-approval-time/*.json
+!pr-approval-time/tests/fixtures/*.json
+
+# session artifacts
+HANDOFF.md

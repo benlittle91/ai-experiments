@@ -53,7 +53,7 @@ require_option_value() {
   fi
 }
 
-check_dependency() {
+require_command() {
   local dep="$1"
   command -v "$dep" >/dev/null 2>&1 || die "Missing dependency '$dep'"
 }
@@ -67,7 +67,7 @@ date_weeks_ago() {
   fi
 }
 
-calc_duration() {
+hours_and_days_between() {
   python3 "$METRICS_PY" calc-duration "$1" "$2"
 }
 
@@ -79,7 +79,7 @@ num_div() {
   python3 "$METRICS_PY" num-div "$1" "$2"
 }
 
-file_stats() {
+days_stats_from_file() {
   python3 "$METRICS_PY" file-stats "$1"
 }
 
@@ -103,7 +103,7 @@ setup_temp_files() {
   trap 'rm -f "$JIRA_CACHE_FILE" "$ALL_DAYS_FILE" "$ALL_DAYS_PER_SP_FILE" "$STORYPOINT_TABLE_FILE" "$PER_REPO_FILE"' EXIT
 }
 
-get_jira_metadata() {
+fetch_story_points() {
   local issue_key="$1"
   local cached_line
   cached_line=$(grep -E "^${issue_key}[[:space:]]" "$JIRA_CACHE_FILE" | head -1 || true)
@@ -115,6 +115,7 @@ get_jira_metadata() {
   local raw sp
   raw=$(jira issue view "$issue_key" --raw 2>/dev/null || true)
   if [[ -z "$raw" ]]; then
+    echo "  WARN: jira issue view $issue_key returned no data (auth issue, or ticket not found)" >&2
     printf "%s\t\n" "$issue_key" >> "$JIRA_CACHE_FILE"
     echo ""
     return 0
@@ -184,7 +185,7 @@ resolve_period() {
 
 validate_config() {
   for dep in gh jq python3 awk; do
-    check_dependency "$dep"
+    require_command "$dep"
   done
 
   if [[ ! -f "$METRICS_PY" ]]; then
@@ -241,7 +242,8 @@ process_repo() {
     --state merged \
     --search "merged:>=$SINCE_DATE merged:<=$UNTIL_DATE" \
     --json number,createdAt,mergedAt,title,url,headRefName,body \
-    --limit 500 2>/dev/null || echo "[]")
+    --limit 500 2>/dev/null) \
+    || { echo "  WARN: gh pr list failed for $repo (empty period will be reported)" >&2; pr_json="[]"; }
 
   local pr_count
   pr_count=$(echo "$pr_json" | jq 'length')
@@ -279,13 +281,13 @@ process_repo() {
     if [[ "$NO_JIRA" -eq 0 ]]; then
       jira_key=$(extract_jira_key "$pr_title" "$head_ref" "$pr_body")
       if [[ -n "$jira_key" ]]; then
-        story_points=$(get_jira_metadata "$jira_key")
+        story_points=$(fetch_story_points "$jira_key")
       fi
     fi
 
     reviews_json=$(gh pr view "$pr_num" --json reviews 2>/dev/null \
-      | jq '[.reviews[] | select(.state == "APPROVED" and .author.login != null) | {author: .author.login, submittedAt: .submittedAt}] | sort_by(.submittedAt) | unique_by(.author)' 2>/dev/null \
-      || echo '[]')
+      | jq '[.reviews[] | select(.state == "APPROVED" and .author.login != null) | {author: .author.login, submittedAt: .submittedAt}] | sort_by(.submittedAt) | unique_by(.author)' 2>/dev/null) \
+      || { echo "  WARN: could not fetch reviews for PR #$pr_num in $repo (treating as 0 approvals)" >&2; reviews_json='[]'; }
 
     unique_approvals=$(echo "$reviews_json" | jq 'length')
 
@@ -299,7 +301,7 @@ process_repo() {
     repo_approved=$((repo_approved + 1))
     second_approval=$(echo "$reviews_json" | jq -r '.[1].submittedAt')
 
-    duration=$(calc_duration "$created_at" "$second_approval")
+    duration=$(hours_and_days_between "$created_at" "$second_approval")
     hours=$(echo "$duration" | cut -f1)
     days=$(echo "$duration" | cut -f2)
 
@@ -382,12 +384,12 @@ main() {
     process_repo "$REPO"
   done
 
-  raw_stats=$(file_stats "$ALL_DAYS_FILE")
+  raw_stats=$(days_stats_from_file "$ALL_DAYS_FILE")
   raw_avg=$(echo "$raw_stats" | cut -f1)
   raw_median=$(echo "$raw_stats" | cut -f2)
   raw_p75=$(echo "$raw_stats" | cut -f3)
 
-  sp_stats=$(file_stats "$ALL_DAYS_PER_SP_FILE")
+  sp_stats=$(days_stats_from_file "$ALL_DAYS_PER_SP_FILE")
   sp_avg=$(echo "$sp_stats" | cut -f1)
   sp_median=$(echo "$sp_stats" | cut -f2)
   sp_p75=$(echo "$sp_stats" | cut -f3)
