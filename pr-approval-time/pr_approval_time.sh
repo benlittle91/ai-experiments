@@ -13,6 +13,7 @@ SINCE_DATE=""
 UNTIL_DATE=""
 WEEKS_BACK=""
 JIRA_SP_FIELD="customfield_10715"
+JIRA_PROJECT_PREFIX="POS"
 NO_JIRA=0
 GROUP_BY_STORY_POINTS=1
 MAX_REPOS=""
@@ -37,11 +38,12 @@ usage() {
   cat <<'USAGE'
 Usage:
   ./pr_approval_time.sh [weeks]
-  ./pr_approval_time.sh --from YYYY-MM-DD --to YYYY-MM-DD [--jira-sp-field customfield_12345] [--no-jira] [--group-by-story-points|--no-group-by-story-points] [--max-repos N] [--save-json FILE]
+  ./pr_approval_time.sh --from YYYY-MM-DD --to YYYY-MM-DD [--jira-sp-field customfield_12345] [--jira-project-prefix POS] [--no-jira] [--group-by-story-points|--no-group-by-story-points] [--max-repos N] [--save-json FILE]
 
 Notes:
   - Date filtering uses merged PR dates.
   - Jira story point field defaults to customfield_10715.
+  - Jira project prefix defaults to POS (used to match ticket keys in PR titles/branches/bodies).
 USAGE
 }
 
@@ -84,7 +86,7 @@ days_stats_from_file() {
 }
 
 extract_jira_key() {
-  printf "%s\n%s\n%s\n" "$1" "$2" "$3" | grep -Eo 'POS-[0-9]+' | head -1 || true
+  printf "%s\n%s\n%s\n" "$1" "$2" "$3" | grep -Eo "${JIRA_PROJECT_PREFIX}-[0-9]+" | head -1 || true
 }
 
 setup_temp_files() {
@@ -143,6 +145,9 @@ parse_args() {
       --jira-sp-field)
         require_option_value "$1" "${2-}"
         JIRA_SP_FIELD="$2"; shift 2 ;;
+      --jira-project-prefix)
+        require_option_value "$1" "${2-}"
+        JIRA_PROJECT_PREFIX="$2"; shift 2 ;;
       --no-jira)
         NO_JIRA=1; shift ;;
       --group-by-story-points)
@@ -213,7 +218,7 @@ print_header() {
     echo " Repos : ${TOTAL_REPOS}"
   fi
   if [[ "$NO_JIRA" -eq 0 ]]; then
-    echo " Jira  : story point field = $JIRA_SP_FIELD"
+    echo " Jira  : story point field = $JIRA_SP_FIELD, project prefix = $JIRA_PROJECT_PREFIX"
     if [[ "$GROUP_BY_STORY_POINTS" -eq 1 ]]; then
       echo " Group : exact story points = enabled"
     else
