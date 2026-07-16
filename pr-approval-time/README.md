@@ -1,24 +1,29 @@
-# PR Approval Time (GAM Repos)
+# PR Approval Time
 
-A no-nonsense reporting script that measures how long merged PRs take to reach **2 approvals** across GAM repositories.
+A command-line tool that measures how long merged pull requests take to reach **two approvals** across a set of GitHub repositories, and produces leadership-ready summary tables.
 
-It gives you leadership-ready stats for:
-
-- time to second approval (days/hours)
-- optional days-per-story-point normalisation
-- per-repo and overall summaries
+The tool is deliberately unopinionated about *what* the numbers mean — see [`METHODOLOGY.md`](./METHODOLOGY.md) for interpretation guidance, limitations, and comparison to alternative approaches (e.g. Jira column-time).
 
 ---
 
-## What this does
+## What it produces
 
-For each configured repo, the tool:
+For a given date range, the tool:
 
-1. fetches merged PRs in a date range
-2. finds unique approvers (deduped by reviewer)
-3. keeps PRs with **2+ approvals** for the main metric
-4. optionally enriches with Jira story points
-5. outputs summary tables + median/p75 + leadership summary text
+1. Fetches merged PRs from each configured repository.
+2. Deduplicates approvers per PR (a single reviewer approving twice counts once).
+3. Keeps PRs with **two or more unique approvals** for the main metric.
+4. Optionally enriches each PR with its Jira ticket's story-point value.
+5. Prints a streaming per-repo view, a summary table, and a plain-English "leadership summary" paragraph you can paste directly into a report.
+6. Optionally writes the run to a JSON snapshot for later comparison.
+
+Output includes:
+
+- **Time to 2nd approval** — median, p75, and average (in days).
+- **Days per story point** — the same metrics, normalised by ticket effort (Jira mode only).
+- **Per-repo breakdown** — average days for each repository.
+- **Story-point breakdown** — median days grouped by SP size (1 / 2 / 3 / 5 / 8 / 13 …).
+- **Excluded PRs, with reasons** — how many PRs were dropped and why (<2 approvals, no Jira ticket, no story points).
 
 ---
 
@@ -26,9 +31,15 @@ For each configured repo, the tool:
 
 ```text
 pr-approval-time/
-├── pr_approval_time.sh              # orchestrator (gh/jq/jira + reporting)
-├── pr_metrics.py                    # time/math/stat engine
-└── README.md
+├── pr_approval_time.sh   # orchestrator: repo traversal, gh/jq/jira CLI calls
+├── pr_metrics.py         # analytics engine + snapshot writer
+├── pr_compare.py         # CLI that diffs two snapshots
+├── report.py             # text rendering of comparison sections
+├── models.py             # typed dataclasses describing the snapshot JSON
+├── stats.py              # shared percentile / summary-stats helpers
+├── test_stats.py         # unit tests for stats.py
+├── README.md
+└── METHODOLOGY.md        # what the metric measures, what it doesn't, and why
 ```
 
 ---
@@ -37,46 +48,36 @@ pr-approval-time/
 
 Required:
 
-- `bash`
-- `gh`
-- `jq`
-- `python3`
-- `awk`
+- `bash`, `gh`, `jq`, `python3`, `awk`
 
-Optional (only when Jira enrichment is enabled):
+Optional (Jira story-point enrichment only):
 
-- `jira` CLI
+- `jira` CLI (configured for your Jira instance)
+
+---
+
+## Setup
+
+The tool discovers repositories to analyse by scanning a directory of git checkouts. By default it looks at `../../gam/*/` relative to the script — i.e. it expects to be run from inside a checkout that sits alongside a `gam/` directory containing your team's cloned repos.
+
+To point it at a different directory, edit the top of `pr_approval_time.sh`:
+
+```bash
+REPOS_DIR="$(cd "$(dirname "$0")/../../gam" && pwd)"
+```
+
+No other configuration is required for a first run.
 
 ---
 
 ## Quick start
 
-From the `pr-approval-time` directory:
-
 ```bash
 chmod +x pr_approval_time.sh pr_metrics.py
-./pr_approval_time.sh --no-jira --from 2026-01-01 --to 2026-01-31 --max-repos 5
+
+# Smallest possible run — no Jira, two repos, one month:
+./pr_approval_time.sh --no-jira --from 2026-01-01 --to 2026-01-31 --max-repos 2
 ```
-
-> Important: the repo list is currently hardcoded for my team. You must replace it with your own repos before using this outside our setup.
-
-## Configure your repo list (required)
-
-Edit `pr_approval_time.sh` and update the `REPOS=(...)` array to your org/team repositories.
-
-```bash
-# pr_approval_time.sh
-REPOS=(
-  your-repo-1
-  your-repo-2
-  your-repo-3
-)
-```
-
-Tips:
-
-- Keep repo directory names aligned with where this script expects to run from (`$BASE_DIR/<repo-name>`).
-- Start with 2-3 repos and run with `--max-repos` while validating output.
 
 ---
 
@@ -84,96 +85,107 @@ Tips:
 
 ```bash
 ./pr_approval_time.sh [weeks]
+
 ./pr_approval_time.sh --from YYYY-MM-DD --to YYYY-MM-DD \
   [--jira-sp-field customfield_12345] \
+  [--jira-project-prefix POS] \
   [--no-jira] \
   [--group-by-story-points | --no-group-by-story-points] \
-  [--max-repos N]
+  [--max-repos N] \
+  [--save-json FILE]
 ```
+
+### Options
+
+| Flag | Description |
+|---|---|
+| `[weeks]` | Positional. Analyse the last N weeks (default: 8). |
+| `--from`, `--to` | Explicit date range. Both required together, in `YYYY-MM-DD`. Uses PR merged date. |
+| `--jira-sp-field` | Custom Jira field ID that holds story points. Default: `customfield_10715`. |
+| `--jira-project-prefix` | Jira project key prefix used to extract ticket IDs from PR titles / branch names / bodies. Default: `POS`. |
+| `--no-jira` | Skip Jira enrichment entirely. Faster; no story-point breakdown. |
+| `--group-by-story-points` / `--no-group-by-story-points` | Toggle the "grouped by exact story points" table. Default: enabled. |
+| `--max-repos N` | Only analyse the first N discovered repos. Useful while iterating. |
+| `--save-json FILE` | Also write the run to a JSON snapshot for later comparison with `pr_compare.py`. |
 
 ### Examples
 
 ```bash
-# Last 8 weeks (default), with Jira enrichment
-./pr_approval_time.sh
-
-# Last 12 weeks
+# Last 12 weeks with Jira enrichment
 ./pr_approval_time.sh 12
 
-# Explicit date range, no Jira
-./pr_approval_time.sh --from 2026-02-01 --to 2026-02-28 --no-jira
+# Explicit range, no Jira, limited repos
+./pr_approval_time.sh --from 2026-02-01 --to 2026-02-28 --no-jira --max-repos 3
 
-# Date range + custom Jira SP field
-./pr_approval_time.sh --from 2026-02-01 --to 2026-02-28 \
-  --jira-sp-field customfield_10715
+# Save a snapshot for later diffing
+./pr_approval_time.sh --from 2026-04-01 --to 2026-04-30 --save-json april2026.json
 
-# Limit repos while iterating locally
-./pr_approval_time.sh --from 2026-02-01 --to 2026-02-28 --max-repos 3
+# Different Jira project prefix (e.g. GAM instead of POS)
+./pr_approval_time.sh --from 2026-06-01 --to 2026-06-30 --jira-project-prefix GAM
 ```
 
 ---
 
-## Output (at a glance)
+## Comparing periods (`pr_compare.py`)
 
-The script prints:
-
-- repo-by-repo PR processing lines
-- story-point cohort table (if Jira enabled)
-- summary table (`Ttl`, `2+`, `<2`, `NoJ`, `NoSP`, average days)
-- primary/secondary metrics:
-  - time to 2nd approval: median, p75, avg
-  - days/SP: median, p75, avg (if Jira enabled)
-- grouped-by-story-points table (if enabled)
-- leadership summary paragraph you can paste directly
-
-## Comparing periods (month-over-month)
-
-Use `pr_compare.py` to diff two snapshots produced with `--save-json`:
+Once you have two snapshots produced with `--save-json`, diff them:
 
 ```bash
-# Generic period comparison
+# Generic period-over-period comparison
 python3 pr_compare.py april2026.json may2026.json
 
-# AI adoption framing — use when snapshot_a is the pre-AI baseline
-# and snapshot_b is the first period with Copilot reviewing every PR
+# AI-adoption framing — snapshot A is the pre-AI baseline,
+# snapshot B is the first period with AI reviewing every PR
 python3 pr_compare.py april2026.json may2026.json --ai-adoption
 ```
 
 The `--ai-adoption` flag:
-- Adds a dedicated **AI Adoption Impact** section at the top with methodology notes and caveats
-- Relabels all tables as "Baseline" vs "Post-AI" instead of "Period A/B"
-- Highlights the p75 (tail) trend as the key signal for AI review benefit
-- Provides "what to watch" guidance for subsequent months
+
+- Adds a dedicated **AI Adoption Impact** section at the top with methodology notes and caveats.
+- Relabels all tables as "Baseline" vs "Post-AI" instead of "Period A/B".
+- Highlights p75 (the tail) as the key signal for AI review benefit.
+- Provides "what to watch" guidance for subsequent months.
 
 ---
 
+## Testing
 
+```bash
+python3 test_stats.py
+```
 
-- **Bash** handles orchestration (repo traversal, CLI calls, formatting).
-- **Python** handles deterministic analytics (`pr_metrics.py`): datetime math, divisions, percentiles, grouped stats.
+13 unit tests covering the shared percentile / summary-stats / outlier helpers.
 
-This split keeps shell scripting simple and keeps numeric logic maintainable.
+---
+
+## Architecture
+
+- **Bash** handles orchestration: repo traversal, `gh` / `jq` / `jira` CLI calls, output formatting.
+- **Python** handles all deterministic analytics: datetime math, divisions, percentiles, IQR-based outlier detection, grouped stats, snapshot IO.
+
+This split keeps shell scripting simple and keeps numeric logic maintainable and testable.
 
 ---
 
 ## Troubleshooting
 
-- `ERROR: Missing dependency 'X'`
-  Install the missing CLI and re-run.
-
-- `jira CLI not found...`
-  Either install/configure `jira` CLI or run with `--no-jira`.
-
-- `--from and --to must be used together`
-  Provide both values in `YYYY-MM-DD` format.
-
-- Empty-looking stats (`—`)
-  Usually means no PRs met the metric criteria in that window (for example, no PRs with 2+ approvals).
+| Symptom | Fix |
+|---|---|
+| `ERROR: Missing dependency 'X'` | Install the missing CLI and re-run. |
+| `jira CLI not found...` | Either install/configure the `jira` CLI, or run with `--no-jira`. |
+| `--from and --to must be used together` | Provide both, in `YYYY-MM-DD` format. |
+| Empty stats (`—`) | No PRs met the metric criteria in that window — usually means no PRs had two or more approvals. Check the excluded-PRs summary. |
+| `WARN: gh pr list failed for <repo>` | The gh CLI could not query that repo (typically auth or repo-name mismatch). The run continues; the repo is reported with zero PRs. |
 
 ---
 
-## Practical tips
+## Reading the output
 
-- Start with `--max-repos` when tuning date windows.
-- Run `--no-jira` first to baseline raw approval timing.
-- Use Jira mode once SP field quality is confirmed.
+See [`METHODOLOGY.md`](./METHODOLOGY.md) for:
+
+- What "time to 2nd approval" precisely measures.
+- What this tool deliberately *does not* measure.
+- How outliers are detected and displayed.
+- How small-sample buckets are flagged.
+- Why we use PR events rather than Jira column transitions.
+- How to interpret month-over-month changes without over-reading.

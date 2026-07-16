@@ -36,6 +36,7 @@ python3 pr_compare.py jan2026.json feb2026.json
 - `models.py` — typed dataclasses (`Snapshot`, `Period`, `StatBundle`, `RepoStat`, `SpGroup`) describing the on-disk snapshot JSON contract.
 - `pr_compare.py` — thin CLI: loads two snapshots via `Snapshot.load()` and delegates rendering to `report.py`.
 - `report.py` — text rendering of executive / delivery-leads / detailed comparison sections.
+- `METHODOLOGY.md` — what the metric measures, what it deliberately doesn't, and how to interpret results (read this before quoting numbers externally).
 
 This split is intentional: keep shell scripting simple, keep numeric logic maintainable and testable in Python.
 
